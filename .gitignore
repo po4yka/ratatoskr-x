@@ -1,1 +1,24 @@
-# Repository-specific ignore rules will be added with implementation scaffolding.
+# Rust / Cargo build output
+target/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local scratch: personal bookmark exports and legacy Field Theory databases
+# (fixtures/ is tracked, see docs/ARCHITECTURE.md)
+/local/
+*.sqlite
+*.sqlite3
+*.db
+!/fixtures/**
+
+# Editors
+.idea/
+.vscode/
+
+# OS
+.DS_Store
