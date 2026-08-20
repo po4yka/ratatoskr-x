@@ -1,10 +1,21 @@
 # Ratatoskr X
 
-`ratatoskr-x` is the X account and bookmark archive bounded context for Ratatoskr Next. It authenticates a user through the official X OAuth flow, synchronizes bookmarks and bookmark folders, preserves normalized post content and media metadata, and publishes authoritative social-source events for indexing and analysis.
+`ratatoskr-x` is the X account and bookmark archive bounded context for Ratatoskr. It authenticates a user through the official X OAuth flow, synchronizes bookmarks and bookmark folders, preserves normalized post content and media metadata, and publishes authoritative social-source events for indexing and analysis.
 
 > **Status:** architecture bootstrap. OAuth, API clients, synchronization, persistence, and migration tooling described below are planned and are not implemented yet.
 
-## Role in Ratatoskr Next
+> [!IMPORTANT]
+> **Ratatoskr is in development.** No database holds data that has to survive a schema change.
+> While this status holds, these two rules replace what the documents below plan:
+>
+> - the API and the database keep their first version. There is no `v2` and no later major
+>   version.
+> - the database has no migrations. One schema definition exists, and a schema change edits it in
+>   place.
+>
+> Only the repository owner changes this status.
+
+## Role in Ratatoskr
 
 Unlike Instagram and Threads, X exposes an official user-authorized bookmark surface. Ratatoskr can therefore distinguish upstream bookmark state from a local explicit capture.
 
@@ -216,7 +227,7 @@ Events are idempotent under at-least-once delivery. Duplicate page or snapshot p
 
 ## Legacy migration
 
-The current Ratatoskr system reads a Field Theory SQLite database and Markdown library without authenticating to X. Migration treats those records as historical observations:
+The legacy Field Theory system reads a SQLite database and Markdown library without authenticating to X. Migration treats those records as historical observations:
 
 ```text
 acquisition = LegacyImport
