@@ -1,7 +1,7 @@
 # Developing Ratatoskr X
 
 > Status: Proposed  
-> Last reviewed: 2026-08-17
+> Last reviewed: 2026-08-20
 
 Architecture bootstrap: OAuth, X API client, schema, synchronization, and legacy importer are not implemented.
 
@@ -24,3 +24,22 @@ There is no code here yet, so no limit is enforced yet. The commit that brings t
 5. Test pagination, interruption, redelivery, rate limits, compliance state, and write idempotency.
 
 The first scaffold PR must document exact commands. Default CI uses synthetic fixtures and never personal X credentials.
+
+## What a clone needs before you plan a change
+
+A change is planned with OpenSpec, which is a CLI a clone installs for itself. Use the version
+`.github/workflows/openspec.yml` pins, so your terminal and the gate answer the same:
+
+```bash
+npm install --global @fission-ai/openspec@1.10.0
+```
+
+Cross-repository behaviour lives in a store, and registering one is per-machine state that no
+repository can turn on for you — the same kind of step as `git config core.hooksPath .githooks`:
+
+```bash
+git clone git@github.com:po4yka/ratatoskr-workspace.git <path>
+openspec store register <path> --id ratatoskr-workspace
+```
+
+`openspec doctor` reports whether both are in place.
