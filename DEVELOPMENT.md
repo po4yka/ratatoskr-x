@@ -15,6 +15,23 @@ There is no code here yet, so no limit is enforced yet. The commit that brings t
 
 `ratatoskr-workspace/docs/QUALITY_GATES.md` holds the numbers the repositories with code use today, the command that measured each one, and the limits that were rejected with the reason. Read it before you choose numbers, then measure this tree. Each limit is set at the worst case the tree already has, so that the check fails on a regression and not on work that has not been done yet.
 
+## Current validation
+
+This repository has no product manifest or `.github/workflows/ci.yml` yet. Run the current docs-only
+gate locally:
+
+```bash
+git diff --check
+openspec validate --all --strict
+openspec validate --archived
+```
+
+`.github/workflows/openspec.yml` runs the two OpenSpec commands in CI. The first-manifest rule in
+`.github/workflows/fleet.yml` requires the first product manifest to add a product `ci.yml` that
+invokes a test. For a Rust or Node manifest, it also requires `clippy.toml` or
+`eslint.config.js`, respectively; it does not prove that product CI invokes the linter. The
+docs-only/OpenSpec gate remains in addition to product CI.
+
 ## Workflow
 
 1. Confirm documented provider capability, scope, rate/credit cost, and read/write consent.

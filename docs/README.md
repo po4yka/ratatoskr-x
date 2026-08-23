@@ -4,7 +4,7 @@
 - `REQUIREMENTS.md` — functional and provider requirements.
 - `DOMAIN.md` — observations, authoritative snapshots, posts, bookmarks, and folders.
 - `INTERFACES.md` — API/events, provider, Extractor, and Knowledge boundaries.
-- `DATA_MODEL.md` — `x_archive` schema.
+- `DATA_MODEL.md` — planned `x_archive` schema.
 - `THREAT_MODEL.md` — credential, privacy, mutation, cost, and compliance risks.
 - `TESTING.md` — sync, pagination, mutation, and migration tests.
 - `IMPLEMENTATION_PLAN.md` — ordered vertical slices.

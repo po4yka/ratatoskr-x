@@ -20,14 +20,14 @@ It must preserve the difference between:
 
 ## Current phase
 
-The repository is in architecture bootstrap. Do not assume Rust crates, OAuth routes, API clients, migrations, synchronization workers, or CI commands exist unless they are present in the checkout.
+The repository is in architecture bootstrap. Do not assume Rust crates, OAuth routes, API clients, a database schema, synchronization workers, or CI commands exist unless they are present in the checkout.
 
 When creating initial implementation:
 
 - model snapshot authority before optimizing requests;
 - keep X SDK/HTTP types inside adapters;
 - make read and write consent separate;
-- preserve raw/provider evidence safely for diagnostics and migration;
+- preserve raw/provider evidence safely for diagnostics and legacy import;
 - avoid browser-session scraping as a substitute for the supported API.
 
 ### Development status
@@ -286,7 +286,7 @@ Rules:
 
 - preserve the original provider payload separately from normalized projections when policy permits;
 - do not treat rendered HTML from x.com as the canonical API source;
-- do not discard unknown provider fields needed for future schema migration without a retention decision;
+- do not discard unknown provider fields needed for future schema evolution without a retention decision;
 - do not download media or external article bodies without an explicit product/storage policy;
 - never execute embedded links or content instructions.
 
@@ -352,7 +352,7 @@ Legacy SQLite imports are observations, not authoritative X API snapshots.
 
 Do not delete the legacy source as part of import.
 
-## Persistence and migrations
+## Persistence and schema evolution
 
 X writes only its owned schema.
 
@@ -380,7 +380,7 @@ Rules:
 - uniqueness enforces account/provider object identity;
 - post content revisions and account bookmark state are separable;
 - snapshot completion and absence authority are transactional;
-- migrations preserve observation/compliance history;
+- schema changes preserve observation/compliance history;
 - secrets and large raw payloads are stored/referenced using protected mechanisms.
 
 ## Commands and events
@@ -449,7 +449,7 @@ When implementation exists, include applicable tests for:
 - upstream deletion/protection/suspension states;
 - linked article delegation;
 - legacy Field Theory import and deduplication;
-- outbox/inbox replay and migrations.
+- outbox/inbox replay and schema initialization.
 
 Use synthetic/redacted fixtures, not live personal accounts in normal tests.
 
@@ -492,4 +492,4 @@ A task is complete only when:
 - external article extraction and Knowledge analysis remain delegated;
 - upstream compliance states are handled explicitly;
 - relevant repository and workspace tests pass;
-- contracts, migrations, telemetry, and rollout are documented.
+- contracts, schema, telemetry, and rollout are documented.

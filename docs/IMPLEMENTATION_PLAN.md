@@ -11,4 +11,4 @@
 9. Add separately consented idempotent bookmark write-back.
 10. Import Field Theory data, compare shadow snapshots, then cut over.
 
-Definition of Done: no false removals, read/write scopes secure, cost bounded, private content authorized, migrations/events/tests and workspace vertical slice pass. Deferred: DMs and broad account/social graph ingestion.
+Definition of Done: no false removals, read/write scopes secure, cost bounded, private content authorized, schema/events/tests and the planned workspace vertical slice pass. Deferred: DMs and broad account/social graph ingestion.

@@ -71,7 +71,7 @@ ratatoskr-x/
 │   └── test-support/
 ├── services/
 │   └── x/
-├── migrations/
+├── schema/
 ├── fixtures/
 ├── tests/
 └── docs/
@@ -541,7 +541,7 @@ Raw post text and user handles are not metric labels. Traces use internal IDs an
 ### Integration
 
 - encrypted credential lifecycle;
-- SQLx migrations and transactions;
+- SQL schema initialization and transactions;
 - fake paginated provider API;
 - interrupted/full snapshot behavior;
 - outbox/inbox replay;
@@ -559,7 +559,7 @@ Raw post text and user handles are not metric labels. Traces use internal IDs an
 - protected/deleted post changes availability without leaking content;
 - token revocation transitions to reauthorization state.
 
-### Workspace end-to-end
+### Planned workspace end-to-end
 
 - connect account;
 - ingest bookmarks and folders;

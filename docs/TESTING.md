@@ -9,7 +9,7 @@ Required tests:
 - Honest observation timestamps.
 - Idempotent add/remove mutations and partial provider failures.
 - Rate-limit/credit budget, retry-after, reauthorization, deleted/protected/suspended states.
-- SQL migrations, outbox/inbox replay, authorization, and no-content logging.
+- SQL schema initialization, outbox/inbox replay, authorization, and no-content logging.
 - Field Theory legacy import/shadow reconciliation.
 
 Default tests use synthetic/WireMock fixtures; optional sandbox tests use a dedicated account and explicit budget.

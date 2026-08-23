@@ -2,7 +2,7 @@
 
 `ratatoskr-x` is the X account and bookmark archive bounded context for Ratatoskr. It authenticates a user through the official X OAuth flow, synchronizes bookmarks and bookmark folders, preserves normalized post content and media metadata, and publishes authoritative social-source events for indexing and analysis.
 
-> **Status:** architecture bootstrap. OAuth, API clients, synchronization, persistence, and migration tooling described below are planned and are not implemented yet.
+> **Status:** architecture bootstrap. OAuth, API clients, synchronization, persistence, and legacy import tooling described below are planned and are not implemented yet.
 
 > [!IMPORTANT]
 > **Ratatoskr is in development.** No database holds data that has to survive a schema change.
@@ -10,8 +10,8 @@
 >
 > - the API and the database keep their first version. There is no `v2` and no later major
 >   version.
-> - the database has no migrations. One schema definition exists, and a schema change edits it in
->   place.
+> - the database has no migrations. No schema exists yet. The first persistence change creates one
+>   schema definition, and later schema changes edit it in place.
 >
 > Only the repository owner changes this status.
 
@@ -51,7 +51,7 @@ Credentials remain inside this service:
 
 ## Planned data model
 
-The service owns an `x_archive.*` PostgreSQL schema:
+The service will own an `x_archive.*` PostgreSQL schema when persistence is implemented:
 
 ```text
 x_accounts
@@ -301,7 +301,7 @@ Every sync run records mode, pages, cursors, request budget, completeness, warni
 
 ## Workspace integration
 
-`ratatoskr-workspace` pins this service with compatible social contracts, Platform, Knowledge, Extractor, Web, Mobile, Browser Extension, and Telegram commits. The service remains independently testable using recorded provider fixtures and mock OAuth/API servers.
+Planned: `ratatoskr-workspace` will pin this service with compatible social contracts, Platform, Knowledge, Extractor, Web, Mobile, Browser Extension, and Telegram commits. No workspace pin or integration profile exists for this service today. The service will remain independently testable using recorded provider fixtures and mock OAuth/API servers.
 
 ## Project status
 

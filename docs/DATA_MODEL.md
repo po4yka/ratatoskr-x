@@ -1,6 +1,6 @@
 # X connector data model
 
-## Owned schema: `x_archive.*`
+## Planned owned schema: `x_archive.*`
 
 - `accounts`, encrypted `credentials`, scopes, expiry/status, budgets/limits.
 - `posts`, authors, relations, media, URL entities, raw revision blob references.

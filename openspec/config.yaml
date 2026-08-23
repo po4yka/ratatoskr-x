@@ -10,7 +10,7 @@ context: |
 
   This repository holds no code yet. Its documents describe intent; a change here plans behaviour, and the first code arrives with its own ci.yml, its lint configuration carrying the size limits, and its tests.
 
-  The gate command list is the fenced block in DEVELOPMENT.md. That list and .github/workflows/ci.yml are one list, and a step in ci.yml fails when they differ, so change both or neither.
+  The current docs-only gate is the fenced block in DEVELOPMENT.md: git diff --check, openspec validate --all --strict, and openspec validate --archived. .github/workflows/openspec.yml runs the two OpenSpec checks in CI. No product ci.yml exists yet; the first product manifest adds one alongside the unchanged OpenSpec checks. .github/workflows/fleet.yml checks that product CI invokes a test and that a Rust or Node manifest has its language-specific lint configuration; it does not prove that CI invokes the linter.
 
   Development status, binding and overriding anything that plans otherwise: one version only — no v2, no version negotiation, no deprecation window; no database migrations — a schema change edits the schema definition in place; the product is Ratatoskr and never "Ratatoskr Next". Only the repository owner changes this status.
 
@@ -37,8 +37,10 @@ operations:
     guidance:
       - Run the new test before you write the implementation. Confirm it fails for the reason the
         task states, and not for a compile error or a typo.
-      - Run the command list in this repository's DEVELOPMENT.md before the change is complete. That
-        list and .github/workflows/ci.yml are one list, and a step in ci.yml fails when they differ.
+      - Run the current docs-only command list in this repository's DEVELOPMENT.md before the change
+        is complete. The first product manifest adds a product gate alongside these unchanged
+        OpenSpec checks. .github/workflows/fleet.yml checks for a test invocation and the applicable
+        Rust or Node lint configuration, but it does not prove that the gate invokes the linter.
       - Do not tick a task whose test has not been run.
   archive:
     guidance:
