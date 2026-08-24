@@ -1,0 +1,28 @@
+[package]
+name = "ratatoskr-x-persistence"
+description = "The PostgreSQL pool, the embedded x_archive schema, and the disposable-database harness"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[lib]
+name = "x_persistence"
+path = "src/lib.rs"
+
+[dependencies]
+sqlx.workspace      = true
+thiserror.workspace = true
+tracing.workspace   = true
+
+[dependencies.uuid]
+workspace = true
+optional  = true
+
+[features]
+# The disposable-database harness. Never enabled by a service binary.
+test-support = ["dep:uuid"]
+
+[lints]
+workspace = true

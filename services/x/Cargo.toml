@@ -1,0 +1,19 @@
+[package]
+name = "ratatoskr-x"
+description = "The ratatoskr-x service binary"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[[bin]]
+name = "ratatoskr-x"
+path = "src/main.rs"
+
+[dependencies]
+ratatoskr-x-core.workspace = true
+tokio.workspace     = true
+
+[lints]
+workspace = true

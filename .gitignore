@@ -22,3 +22,6 @@ target/
 
 # OS
 .DS_Store
+
+# Git worktrees (agent task isolation)
+.worktrees/

@@ -1,0 +1,12 @@
+msrv = "1.97"
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-indexing-slicing-in-tests = true
+too-many-lines-threshold = 100
+too-many-arguments-threshold = 7
+excessive-nesting-threshold = 5
+
+disallowed-methods = [
+  { path = "std::env::var", reason = "configuration is read only by x_core::config" },
+  { path = "std::env::var_os", reason = "configuration is read only by x_core::config" },
+]
