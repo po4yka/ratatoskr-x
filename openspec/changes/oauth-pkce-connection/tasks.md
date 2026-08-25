@@ -96,7 +96,7 @@ Note on 7.7-7.10 evidence: the repository was implemented directly in its final 
 
 ## 8. Gate, documentation, archive, integration
 
-- [ ] 8.1 Update `README.md` (status paragraph and milestone wording: OAuth/PKCE, encrypted credentials, and budgets implemented; sync items remain) and `DEVELOPMENT.md` (toolchain paragraph now that Reqwest/Rustls and encrypted credentials exist; gate list unchanged and still byte-identical to ci.yml). Cannot start from a failing test: documentation.
-- [ ] 8.2 Run the full local gate with the disposable Postgres container and capture evidence: `git diff --check`, `openspec validate --all --strict`, `cargo fetch --locked`, `cargo deny --locked check`, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, file-length ratchet command, `cargo build --workspace --locked`, `cargo test --workspace --locked`, `cargo build --workspace --locked --release`.
-- [ ] 8.3 With every box above ticked, commit the branch (Conventional Commits), archive the change via OpenSpec, and verify `openspec validate --archived`.
+- [x] 8.1 Update `README.md` (status paragraph and milestone wording: OAuth/PKCE, encrypted credentials, and budgets implemented; sync items remain) and `DEVELOPMENT.md` (toolchain paragraph now that Reqwest/Rustls and encrypted credentials exist; gate list unchanged and still byte-identical to ci.yml). Cannot start from a failing test: documentation.
+- [x] 8.2 Run the full local gate with the disposable Postgres container and capture evidence: `git diff --check`, `openspec validate --all --strict`, `cargo fetch --locked`, `cargo deny --locked check`, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, file-length ratchet command, `cargo build --workspace --locked`, `cargo test --workspace --locked`, `cargo build --workspace --locked --release`.
+- [x] 8.3 With every box above ticked, commit the branch (Conventional Commits), archive the change via OpenSpec, and verify `openspec validate --archived`.
 - [ ] 8.4 Integrate: merge the branch into `main`, push `main` to the remote, delete the worktree and the task branch.
