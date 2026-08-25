@@ -9,14 +9,14 @@ Every behaviour task is a pair: the first task adds a test that fails for the st
 
 ## 2. Typed finite configuration (`x-core`)
 
-- [ ] 2.1 RED: add `crates/x-core/tests/config.rs` with `unknown_environment_key_is_refused`: given `RATATOSKR__UNKNOWN__KEY=1`, `load()` must return `Err` whose operator report names the refused key. Stub `load()` to return defaults ignoring the environment; run `cargo nextest`-equivalent `cargo test -p ratatoskr-x-core --test config` and confirm the failure is the missing refusal (Ok returned), not a compile error.
-- [ ] 2.2 GREEN: wire `Figment::from(Serialized::defaults(...)).merge(Env::prefixed("RATATOSKR__").split("__"))` with `#[serde(deny_unknown_fields)]` config structs and `ConfigError::Source` value-free reporting; the test passes.
-- [ ] 2.3 RED: add test `absent_variables_yield_documented_defaults` asserting the loaded config equals the documented defaults (listen `127.0.0.1:8080`, JSON format, filter `info`, max connections 5); make it fail first by stubbing defaults away from the declared model.
-- [ ] 2.4 GREEN: complete the typed model and its `Default` so defaults flow through figment; the test passes.
-- [ ] 2.5 RED: add test `invalid_values_report_all_violations_together`: two violating overrides (empty database URL, zero max connections) must yield one `Err` whose violation list length is 2; make it fail with a validation stub that returns an empty violation list.
-- [ ] 2.6 GREEN: implement semantic `validate()` collecting every violation into `ConfigError::Invalid(Vec<Violation>)`; the test passes.
-- [ ] 2.7 RED: add test `config_rejection_maps_to_exit_code_78` asserting `ConfigError::exit_code() == 78`; make it fail with a stub returning 1.
-- [ ] 2.8 GREEN: implement `exit_code()` returning 78 for both `Source` and `Invalid`; the test passes.
+- [x] 2.1 RED: add `crates/x-core/tests/config.rs` with `unknown_environment_key_is_refused`: given `RATATOSKR__UNKNOWN__KEY=1`, `load()` must return `Err` whose operator report names the refused key. Stub `load()` to return defaults ignoring the environment; run `cargo nextest`-equivalent `cargo test -p ratatoskr-x-core --test config` and confirm the failure is the missing refusal (Ok returned), not a compile error.
+- [x] 2.2 GREEN: wire `Figment::from(Serialized::defaults(...)).merge(Env::prefixed("RATATOSKR__").split("__"))` with `#[serde(deny_unknown_fields)]` config structs and `ConfigError::Source` value-free reporting; the test passes.
+- [x] 2.3 RED: add test `absent_variables_yield_documented_defaults` asserting the loaded config equals the documented defaults (listen `127.0.0.1:8080`, JSON format, filter `info`, max connections 5); make it fail first by stubbing defaults away from the declared model.
+- [x] 2.4 GREEN: complete the typed model and its `Default` so defaults flow through figment; the test passes.
+- [x] 2.5 RED: add test `invalid_values_report_all_violations_together`: two violating overrides (empty database URL, zero max connections) must yield one `Err` whose violation list length is 2; make it fail with a validation stub that returns an empty violation list.
+- [x] 2.6 GREEN: implement semantic `validate()` collecting every violation into `ConfigError::Invalid(Vec<Violation>)`; the test passes.
+- [x] 2.7 RED: add test `config_rejection_maps_to_exit_code_78` asserting `ConfigError::exit_code() == 78`; make it fail with a stub returning 1.
+- [x] 2.8 GREEN: implement `exit_code()` returning 78 for both `Source` and `Invalid`; the test passes.
 
 ## 3. Structured telemetry (`x-telemetry`)
 
