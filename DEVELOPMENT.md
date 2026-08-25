@@ -2,11 +2,11 @@
 
 > Status: Active. Last reviewed: 2026-08-25
 
-The first scaffold is implemented: a Rust workspace with typed configuration, structured telemetry, process-state endpoints, and the first-version `x_archive` schema. OAuth, the X API client, synchronization, post normalization, and the legacy importer are not implemented.
+The first scaffold is implemented: a Rust workspace with typed configuration, structured telemetry, process-state endpoints, and the first-version `x_archive` schema. The official OAuth 2.0 Authorization Code connection with PKCE — encrypted credential envelopes, rotation-aware refresh with reuse detection, revocation, scope auditing — and the durable per-account API budget gate are implemented. Bookmark synchronization, post normalization, and the legacy importer are not.
 
 ## Toolchain
 
-Rust/Tokio pinned by `rust-toolchain.toml` (1.97.0), axum for the admin listener, SQLx/PostgreSQL without the migrate feature — `schema.sql` is edited in place while development status forbids migrations. NATS JetStream, Reqwest/Rustls, OAuth PKCE, encrypted credentials, provider fixtures/WireMock, and testcontainers arrive with the changes that need them.
+Rust/Tokio pinned by `rust-toolchain.toml` (1.97.0), axum for the admin listener, SQLx/PostgreSQL without the migrate feature — `schema.sql` is edited in place while development status forbids migrations. Reqwest/Rustls carries the OAuth token adapter behind recorded provider fixtures served by WireMock in tests; AES-256-GCM encrypts credentials under an environment-provided key; NATS JetStream and testcontainers arrive with the changes that need them.
 
 ## Code size limits
 
