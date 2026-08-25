@@ -1312,6 +1312,8 @@ name = "ratatoskr-x"
 version = "0.1.0"
 dependencies = [
  "ratatoskr-x-core",
+ "ratatoskr-x-persistence",
+ "sqlx",
  "tokio",
 ]
 
@@ -1340,7 +1342,7 @@ version = "0.1.0"
 dependencies = [
  "sqlx",
  "thiserror",
- "tracing",
+ "tokio",
  "uuid",
 ]
 

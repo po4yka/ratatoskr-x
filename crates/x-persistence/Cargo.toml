@@ -14,7 +14,6 @@ path = "src/lib.rs"
 [dependencies]
 sqlx.workspace      = true
 thiserror.workspace = true
-tracing.workspace   = true
 
 [dependencies.uuid]
 workspace = true
@@ -23,6 +22,10 @@ optional  = true
 [features]
 # The disposable-database harness. Never enabled by a service binary.
 test-support = ["dep:uuid"]
+
+[dev-dependencies]
+tokio.workspace = true
+uuid.workspace  = true
 
 [lints]
 workspace = true
