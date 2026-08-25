@@ -54,6 +54,21 @@ impl From<&str> for SecretKey {
     }
 }
 
+impl SecretKey {
+    /// Decodes the configured key material, accepting padded or unpadded base64url,
+    /// and yields exactly the 32 raw bytes the cipher needs; anything else is [`None`].
+    #[must_use]
+    pub fn decoded_key(&self) -> Option<[u8; 32]> {
+        use base64::Engine as _;
+        let raw = self.0.trim();
+        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(raw)
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(raw))
+            .ok()?;
+        decoded.try_into().ok()
+    }
+}
+
 /// Provider OAuth client and consent settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -218,7 +233,7 @@ fn validate(config: &XConfig) -> Violations {
         .security
         .token_encryption_key
         .as_ref()
-        .is_some_and(|key| decode_key(key).is_none())
+        .is_some_and(|key| key.decoded_key().is_none())
     {
         violations.push("security.token_encryption_key must be 32 raw bytes base64url-encoded");
     }
@@ -260,16 +275,4 @@ fn validate(config: &XConfig) -> Violations {
         violations.push("budgets.window_seconds must be at least 1");
     }
     violations
-}
-
-/// Decodes the configured key material, accepting padded or unpadded base64url, and yields
-/// exactly the 32 raw bytes the cipher needs; anything else is [`None`].
-fn decode_key(key: &SecretKey) -> Option<[u8; 32]> {
-    use base64::Engine as _;
-    let raw = key.0.trim();
-    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(raw)
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(raw))
-        .ok()?;
-    decoded.try_into().ok()
 }
