@@ -1311,10 +1311,15 @@ dependencies = [
 name = "ratatoskr-x"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "ratatoskr-x-core",
+ "ratatoskr-x-http",
  "ratatoskr-x-persistence",
+ "ratatoskr-x-telemetry",
  "sqlx",
+ "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

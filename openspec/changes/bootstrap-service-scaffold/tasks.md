@@ -55,10 +55,10 @@ Integration tests in this section require a reachable PostgreSQL at `X_TEST_DATA
 
 ## 6. Service binary bootstrap (`services/x`)
 
-- [ ] 6.1 RED: add `services/x/tests/bootstrap.rs` with `subsystem_errors_map_to_distinct_exit_codes`: configuration failure maps to 78 while telemetry, persistence, and listener failures map to a nonzero code different from 78, each rendering a static subsystem message; make it fail with a `BootstrapError` stub that has no variants.
-- [ ] 6.2 GREEN: implement the typed `BootstrapError` aggregation with `From` conversions and `exit_code()`; the test passes.
-- [ ] 6.3 RED: add `services/x/tests/smoke.rs` with `service_serves_health_endpoints_until_sigterm`: launch the compiled binary (`env!("CARGO_BIN_EXE_ratatoskr-x")`) with valid config pointing at a harness database, wait for the startup event carrying the bound address, request `/health/live` (expect 200) and `/version` (expect service `ratatoskr-x`), send SIGTERM, and expect exit status success; make it fail because the stubbed binary exits immediately without serving.
-- [ ] 6.4 GREEN: implement `main` bootstrap order (config -> exit 78 on rejection -> telemetry guard -> database connect + schema apply -> bind listener -> publish startup event -> grant readiness -> SIGINT/SIGTERM graceful drain -> clean shutdown exit); the test passes.
+- [x] 6.1 RED: add `services/x/tests/bootstrap.rs` with `subsystem_errors_map_to_distinct_exit_codes`: configuration failure maps to 78 while telemetry, persistence, and listener failures map to a nonzero code different from 78, each rendering a static subsystem message; make it fail with a `BootstrapError` stub that has no variants.
+- [x] 6.2 GREEN: implement the typed `BootstrapError` aggregation with `From` conversions and `exit_code()`; the test passes.
+- [x] 6.3 RED: add `services/x/tests/smoke.rs` with `service_serves_health_endpoints_until_sigterm`: launch the compiled binary (`env!("CARGO_BIN_EXE_ratatoskr-x")`) with valid config pointing at a harness database, wait for the startup event carrying the bound address, request `/health/live` (expect 200) and `/version` (expect service `ratatoskr-x`), send SIGTERM, and expect exit status success; make it fail because the stubbed binary exits immediately without serving.
+- [x] 6.4 GREEN: implement `main` bootstrap order (config -> exit 78 on rejection -> telemetry guard -> database connect + schema apply -> bind listener -> publish startup event -> grant readiness -> SIGINT/SIGTERM graceful drain -> clean shutdown exit); the test passes.
 
 ## 7. Gate, documentation, archive
 
