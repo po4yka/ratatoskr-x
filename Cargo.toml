@@ -1,0 +1,71 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/x-core",
+    "crates/x-http",
+    "crates/x-persistence",
+    "crates/x-telemetry",
+    "services/x",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "BSD-3-Clause"
+repository = "https://github.com/po4yka/ratatoskr-x"
+
+[workspace.dependencies]
+ratatoskr-x-core = { version = "0.1.0", path = "crates/x-core" }
+ratatoskr-x-http = { version = "0.1.0", path = "crates/x-http" }
+# The disposable-database harness is never enabled by a service binary.
+ratatoskr-x-persistence = { version = "0.1.0", path = "crates/x-persistence", default-features = false }
+ratatoskr-x-telemetry = { version = "0.1.0", path = "crates/x-telemetry" }
+
+axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+figment = { version = "=0.10.19", features = ["env"] }
+metrics = "=0.24.6"
+metrics-exporter-prometheus = { version = "=0.18.3", default-features = false }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sqlx = { version = "=0.8.6", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls-ring",
+    "postgres",
+    "uuid",
+] }
+thiserror = "=2.0.20"
+tokio = { version = "=1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tower = { version = "=0.5.3", features = ["util"] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = [
+    "ansi",
+    "env-filter",
+    "fmt",
+    "json",
+    "registry",
+    "std",
+] }
+uuid = { version = "=1.24.1", features = ["v7"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+unreachable_pub = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+missing_errors_doc = "deny"
+missing_panics_doc = "deny"
+dbg_macro = "deny"
+todo = "deny"
+print_stdout = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+
+[profile.release]
+debug = 1

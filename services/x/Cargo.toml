@@ -1,0 +1,30 @@
+[package]
+name = "ratatoskr-x"
+description = "The ratatoskr-x service binary"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[[bin]]
+name = "ratatoskr-x"
+path = "src/main.rs"
+
+[dependencies]
+axum.workspace = true
+ratatoskr-x-core.workspace = true
+ratatoskr-x-http.workspace = true
+# The disposable-database harness stays out: this dependency never enables test-support.
+ratatoskr-x-persistence.workspace = true
+ratatoskr-x-telemetry.workspace = true
+thiserror.workspace = true
+tokio.workspace     = true
+tracing.workspace   = true
+
+[dev-dependencies]
+ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
+sqlx.workspace = true
+
+[lints]
+workspace = true

@@ -2,7 +2,7 @@
 
 `ratatoskr-x` is the X account and bookmark archive bounded context for Ratatoskr. It authenticates a user through the official X OAuth flow, synchronizes bookmarks and bookmark folders, preserves normalized post content and media metadata, and publishes authoritative social-source events for indexing and analysis.
 
-> **Status:** architecture bootstrap. OAuth, API clients, synchronization, persistence, and legacy import tooling described below are planned and are not implemented yet.
+> **Status:** the service scaffold is implemented — a Rust workspace with typed configuration, structured telemetry, process-state endpoints (`/health/live`, `/health/ready`, `/metrics`, `/version`), and the first-version `x_archive` schema. OAuth, X API clients, synchronization, post normalization, write-back, and legacy import are planned below and not implemented yet.
 
 > [!IMPORTANT]
 > **Ratatoskr is in development.** No database holds data that has to survive a schema change.
@@ -51,7 +51,7 @@ Credentials remain inside this service:
 
 ## Planned data model
 
-The service will own an `x_archive.*` PostgreSQL schema when persistence is implemented:
+The service owns the `x_archive.*` PostgreSQL schema defined in [`schema.sql`](schema.sql), applied in place with no migrations while development status forbids them. The first-version tables:
 
 ```text
 x_accounts
@@ -305,4 +305,4 @@ Planned: `ratatoskr-workspace` will pin this service with compatible social cont
 
 ## Project status
 
-This README defines the intended X connector and archive architecture. No OAuth flow, API client, bookmark snapshot, migration, or persistence implementation exists yet.
+The first vertical slice from `docs/IMPLEMENTATION_PLAN.md` is in place: the workspace builds under a pinned toolchain, the gate runs fmt/clippy/tests/deny beside the OpenSpec checks (see `DEVELOPMENT.md`), and `schema.sql` defines the owned database shape. Everything that talks to X — OAuth, bookmark synchronization, normalization, events, compliance revalidation, and legacy migration — remains unimplemented.

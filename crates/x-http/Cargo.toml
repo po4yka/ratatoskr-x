@@ -1,0 +1,24 @@
+[package]
+name = "ratatoskr-x-http"
+description = "The admin router: liveness, readiness, metrics, and version endpoints for ratatoskr-x"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[lib]
+name = "x_http"
+path = "src/lib.rs"
+
+[dependencies]
+axum.workspace      = true
+ratatoskr-x-core.workspace = true
+serde.workspace     = true
+
+[dev-dependencies]
+tokio.workspace = true
+tower.workspace = true
+
+[lints]
+workspace = true
