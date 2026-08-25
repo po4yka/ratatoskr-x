@@ -35,6 +35,7 @@ impl Violations {
     }
 
     /// Number of recorded reasons.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -48,6 +49,21 @@ impl Violations {
     /// Iterates the recorded reasons.
     pub fn iter(&self) -> std::slice::Iter<'_, Violation> {
         self.0.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Violations {
+    type Item = &'a Violation;
+    type IntoIter = std::slice::Iter<'a, Violation>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl From<figment::Error> for ConfigError {
+    fn from(error: figment::Error) -> Self {
+        Self::Source(Box::new(error))
     }
 }
 
@@ -66,7 +82,7 @@ impl fmt::Display for Violations {
 pub enum ConfigError {
     /// The environment could not be shaped into the declared configuration tree.
     #[error("the configuration could not be read: {0}")]
-    Source(#[from] figment::Error),
+    Source(Box<figment::Error>),
     /// The configuration parsed but violated its own rules; every violation is reported together.
     #[error("the configuration was rejected:\n{}", violations)]
     Invalid {

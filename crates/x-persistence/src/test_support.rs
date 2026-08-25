@@ -1,8 +1,13 @@
 //! The disposable-database harness. Compiled only under `test-support`, which no service
 //! binary enables.
 
+use std::time::Duration;
+
 use crate::database::Database;
 use crate::error::PersistenceError;
+
+/// How long administrative one-shot connections may take to establish.
+const ADMIN_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The administrative connection the harness uses to create and drop databases.
 pub const ADMIN_URL_ENV: &str = "X_TEST_DATABASE_URL";
@@ -48,6 +53,7 @@ impl TestDatabase {
 
         let admin = sqlx::postgres::PgPoolOptions::new()
             .max_connections(1)
+            .acquire_timeout(ADMIN_CONNECT_TIMEOUT)
             .connect(&admin_url)
             .await
             .map_err(PersistenceError::Connect)?;
@@ -80,6 +86,7 @@ impl TestDatabase {
         self.database.pool().close().await;
         let admin = sqlx::postgres::PgPoolOptions::new()
             .max_connections(1)
+            .acquire_timeout(ADMIN_CONNECT_TIMEOUT)
             .connect(&Self::admin_url())
             .await
             .map_err(PersistenceError::Connect)?;

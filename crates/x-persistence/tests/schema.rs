@@ -43,6 +43,10 @@ pub fn admin_url() -> String {
 /// Creates a uniquely named disposable database and returns `(url, name, admin_pool)`.
 ///
 /// The caller drops the returned database when done.
+///
+/// # Panics
+/// Panics when the administrative connection or the `CREATE DATABASE` fails; the suite cannot
+/// continue without one.
 pub async fn create_disposable_database() -> (String, String, sqlx::PgPool) {
     let admin_url = admin_url();
     let base = admin_url
@@ -52,6 +56,7 @@ pub async fn create_disposable_database() -> (String, String, sqlx::PgPool) {
         .to_owned();
     let admin = sqlx::postgres::PgPoolOptions::new()
         .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(5))
         .connect(&admin_url)
         .await
         .expect("an administrative connection");
@@ -66,6 +71,9 @@ pub async fn create_disposable_database() -> (String, String, sqlx::PgPool) {
 }
 
 /// Drops the named database and closes the administrative pool.
+///
+/// # Panics
+/// Panics when the drop fails; a leaked disposable database would poison later runs.
 pub async fn drop_disposable_database(name: &str, admin: &sqlx::PgPool) {
     sqlx::query(&format!(r#"drop database if exists "{name}" with (force)"#))
         .execute(admin)

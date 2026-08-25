@@ -14,7 +14,7 @@ use tower::ServiceExt as _;
 use x_http::admin::{RuntimeState, admin_router};
 
 async fn get(path: &'static str) -> axum::response::Response {
-    let router = admin_router(Arc::new(RuntimeState::new()), || String::new());
+    let router = admin_router(Arc::new(RuntimeState::new()), String::new);
     let request = Request::builder()
         .uri(path)
         .body(Body::empty())
@@ -42,7 +42,7 @@ async fn live_reports_running_state() {
 
 #[tokio::test]
 async fn ready_tracks_initialization_and_names_checks() {
-    let router = admin_router(Arc::new(RuntimeState::new()), || String::new());
+    let router = admin_router(Arc::new(RuntimeState::new()), String::new);
     let request = Request::builder()
         .uri("/health/ready")
         .body(Body::empty())
@@ -61,7 +61,7 @@ async fn ready_tracks_initialization_and_names_checks() {
 
     let state = Arc::new(RuntimeState::new());
     state.mark_database_ready();
-    let router = admin_router(state.clone(), || String::new());
+    let router = admin_router(state.clone(), String::new);
     let request = Request::builder()
         .uri("/health/ready")
         .body(Body::empty())

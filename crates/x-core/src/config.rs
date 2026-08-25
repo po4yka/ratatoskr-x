@@ -18,7 +18,7 @@ pub const ENV_PREFIX: &str = "RATATOSKR__";
 pub struct XConfig {
     /// The admin listener that serves process-state endpoints.
     pub admin: AdminConfig,
-    /// The PostgreSQL database this service owns its schema in.
+    /// The `PostgreSQL` database this service owns its schema in.
     pub database: DatabaseConfig,
     /// Structured logging and metrics output.
     pub telemetry: TelemetryConfig,

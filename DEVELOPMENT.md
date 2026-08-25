@@ -1,24 +1,44 @@
 # Developing Ratatoskr X
 
-> Status: Proposed  
-> Last reviewed: 2026-08-20
+> Status: Active. Last reviewed: 2026-08-25
 
-Architecture bootstrap: OAuth, X API client, schema, synchronization, and legacy importer are not implemented.
+The first scaffold is implemented: a Rust workspace with typed configuration, structured telemetry, process-state endpoints, and the first-version `x_archive` schema. OAuth, the X API client, synchronization, post normalization, and the legacy importer are not implemented.
 
-## Intended toolchain
+## Toolchain
 
-Rust/Tokio, Reqwest/Rustls, OAuth 2.0 PKCE, SQLx/PostgreSQL, encrypted credentials, NATS JetStream, provider fixtures/WireMock, tracing, and testcontainers.
+Rust/Tokio pinned by `rust-toolchain.toml` (1.97.0), axum for the admin listener, SQLx/PostgreSQL without the migrate feature — `schema.sql` is edited in place while development status forbids migrations. NATS JetStream, Reqwest/Rustls, OAuth PKCE, encrypted credentials, provider fixtures/WireMock, and testcontainers arrive with the changes that need them.
 
 ## Code size limits
 
-There is no code here yet, so no limit is enforced yet. The commit that brings the first manifest brings the configuration that carries the limits with it: `clippy.toml` beside a `Cargo.toml`, `eslint.config.js` beside a `package.json`. `fleet.yml` fails the gate when a manifest arrives without one, so the rule has a check behind it and not only this paragraph.
+`clippy.toml` beside the manifest carries the limits: msrv 1.97, function-length threshold 100, argument threshold 7, nesting threshold 5, and a disallowed-methods rule that reserves `std::env::var` for `x_core::config`. The one limit clippy cannot express — file length — is the 850-line ratchet step in `.github/workflows/ci.yml`. The numbers follow `ratatoskr-workspace/docs/QUALITY_GATES.md`; each sits at the worst case the sibling trees measured, so a regression fails and finished work does not.
 
-`ratatoskr-workspace/docs/QUALITY_GATES.md` holds the numbers the repositories with code use today, the command that measured each one, and the limits that were rejected with the reason. Read it before you choose numbers, then measure this tree. Each limit is set at the worst case the tree already has, so that the check fails on a regression and not on work that has not been done yet.
+## The gate
 
-## Current validation
+Run it locally exactly as `.github/workflows/ci.yml` runs it. Integration tests need a PostgreSQL 17 cluster with ICU collation; start one disposable container and export its URL:
 
-This repository has no product manifest or `.github/workflows/ci.yml` yet. Run the current docs-only
-gate locally:
+```bash
+docker run -d --name ratatoskr-x-pg -p 5432:5432 \
+  -e POSTGRES_USER=x -e POSTGRES_PASSWORD=x -e POSTGRES_DB=x \
+  -e POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=und-x-icu --encoding=UTF8" \
+  postgres:17
+export X_TEST_DATABASE_URL=postgres://x:x@127.0.0.1:5432/x
+```
+
+### Rust — also the CI gate
+
+```bash
+cargo fetch --locked
+cargo deny --locked check
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo build --workspace --locked
+cargo test --workspace --locked
+cargo build --workspace --locked --release
+```
+
+The command list above and the `gate` job's `run:` steps are one list by rule; a step in `.github/workflows/ci.yml` diffs them and fails on drift, treating this document as the wrong side.
+
+### OpenSpec checks, unchanged
 
 ```bash
 git diff --check
@@ -26,11 +46,7 @@ openspec validate --all --strict
 openspec validate --archived
 ```
 
-`.github/workflows/openspec.yml` runs the two OpenSpec commands in CI. The first-manifest rule in
-`.github/workflows/fleet.yml` requires the first product manifest to add a product `ci.yml` that
-invokes a test. For a Rust or Node manifest, it also requires `clippy.toml` or
-`eslint.config.js`, respectively; it does not prove that product CI invokes the linter. The
-docs-only/OpenSpec gate remains in addition to product CI.
+`.github/workflows/openspec.yml` runs the two OpenSpec commands in CI alongside product CI.
 
 ## Workflow
 
@@ -40,7 +56,7 @@ docs-only/OpenSpec gate remains in addition to product CI.
 4. Never infer removal from a partial page scan.
 5. Test pagination, interruption, redelivery, rate limits, compliance state, and write idempotency.
 
-The first scaffold PR must document exact commands. Default CI uses synthetic fixtures and never personal X credentials.
+Default CI uses synthetic fixtures and never personal X credentials.
 
 ## What a clone needs before you plan a change
 

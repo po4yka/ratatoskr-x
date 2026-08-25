@@ -83,7 +83,6 @@ struct AdminState {
 }
 
 /// Builds the admin router serving `/health/live`, `/health/ready`, `/metrics`, and `/version`.
-#[must_use]
 pub fn admin_router<R>(state: Arc<RuntimeState>, render_metrics: R) -> Router
 where
     R: Fn() -> String + Send + Sync + 'static,

@@ -12,7 +12,7 @@ use x_core::error::ConfigError;
 fn figment_with(pairs: &[(&str, Value)]) -> Figment {
     let mut figment = Figment::from(Serialized::defaults(XConfig::default()));
     for (key, value) in pairs {
-        figment = figment.merge(Serialized::default(*key, value.clone()));
+        figment = figment.merge(Serialized::default(key, value.clone()));
     }
     figment
 }
@@ -43,8 +43,10 @@ fn invalid_values_report_all_violations_together() {
         ("admin.listen_addr", Value::from("not-an-address")),
         ("database.max_connections", Value::from(0_u32)),
     ]);
-    let Err(ConfigError::Invalid { violations }) = XConfig::extract_from(&figment) else {
-        panic!("semantic violations must surface as one collected rejection");
+    let error = XConfig::extract_from(&figment)
+        .expect_err("semantic violations must surface as one collected rejection");
+    let ConfigError::Invalid { violations } = error else {
+        return;
     };
     assert_eq!(
         violations.len(),

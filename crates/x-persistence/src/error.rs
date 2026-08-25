@@ -1,4 +1,4 @@
-//! Typed failures raised while talking to PostgreSQL.
+//! Typed failures raised while talking to `PostgreSQL`.
 
 /// Why a persistence operation failed.
 #[derive(Debug, thiserror::Error)]

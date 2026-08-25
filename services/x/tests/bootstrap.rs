@@ -38,10 +38,6 @@ fn subsystem_errors_map_to_distinct_exit_codes() {
         (&persistence, "database"),
         (&listener, "listener"),
     ] {
-        assert!(
-            error.report().contains(word),
-            "{} names its subsystem",
-            word
-        );
+        assert!(error.report().contains(word), "{word} names its subsystem");
     }
 }

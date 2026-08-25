@@ -55,7 +55,7 @@ async fn run() -> Result<(), BootstrapError> {
         async move {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {},
-                _ = terminate() => {},
+                () = terminate() => {},
             }
             state.begin_drain();
             tracing::info!("shutdown started");

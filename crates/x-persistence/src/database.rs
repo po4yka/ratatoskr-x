@@ -1,6 +1,11 @@
 //! The connection pool and the embedded `x_archive` schema application.
 
+use std::time::Duration;
+
 use crate::error::PersistenceError;
+
+/// How long any pooled connection may take to establish before failing.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The single editable definition of the owned database shape. There are no migrations while
 /// development status forbids them: this file changes in place, and test databases are built
@@ -10,7 +15,7 @@ const SCHEMA: &str = include_str!("../../../schema.sql");
 /// The advisory-lock key serializing concurrent schema applications.
 const SCHEMA_LOCK: i64 = 6_941_023_317_588_530_517;
 
-/// A pooled handle to the service's PostgreSQL database.
+/// A pooled handle to the service's `PostgreSQL` database.
 #[derive(Debug, Clone)]
 pub struct Database {
     pool: sqlx::PgPool,
@@ -24,6 +29,7 @@ impl Database {
     pub async fn connect(url: &str, max_connections: u32) -> Result<Self, PersistenceError> {
         let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(max_connections)
+            .acquire_timeout(CONNECT_TIMEOUT)
             .connect(url)
             .await
             .map_err(PersistenceError::Connect)?;
