@@ -78,6 +78,45 @@ impl TestDatabase {
         &self.name
     }
 
+    /// Seeds one `x_archive.accounts` row, returning its generated id.
+    ///
+    /// # Errors
+    /// When the insert fails.
+    pub async fn seed_account(
+        &self,
+        provider_user_id: &str,
+    ) -> Result<sqlx::types::Uuid, PersistenceError> {
+        let row: (sqlx::types::Uuid,) = sqlx::query_as(
+            "insert into x_archive.accounts (provider_user_id) values ($1) returning id",
+        )
+        .bind(provider_user_id)
+        .fetch_one(self.database.pool())
+        .await
+        .map_err(PersistenceError::Query)?;
+        Ok(row.0)
+    }
+
+    /// Seeds one `x_archive.accounts` row with an explicit state vocabulary value,
+    /// returning its generated id.
+    ///
+    /// # Errors
+    /// When the insert fails, including a CHECK rejection.
+    pub async fn seed_account_with_state(
+        &self,
+        provider_user_id: &str,
+        state: &str,
+    ) -> Result<sqlx::types::Uuid, PersistenceError> {
+        let row: (sqlx::types::Uuid,) = sqlx::query_as(
+            "insert into x_archive.accounts (provider_user_id, state) values ($1, $2) returning id",
+        )
+        .bind(provider_user_id)
+        .bind(state)
+        .fetch_one(self.database.pool())
+        .await
+        .map_err(PersistenceError::Query)?;
+        Ok(row.0)
+    }
+
     /// Closes the pool and drops the database with `FORCE`.
     ///
     /// # Errors

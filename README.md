@@ -2,7 +2,7 @@
 
 `ratatoskr-x` is the X account and bookmark archive bounded context for Ratatoskr. It authenticates a user through the official X OAuth flow, synchronizes bookmarks and bookmark folders, preserves normalized post content and media metadata, and publishes authoritative social-source events for indexing and analysis.
 
-> **Status:** the service scaffold is implemented — a Rust workspace with typed configuration, structured telemetry, process-state endpoints (`/health/live`, `/health/ready`, `/metrics`, `/version`), and the first-version `x_archive` schema. OAuth, X API clients, synchronization, post normalization, write-back, and legacy import are planned below and not implemented yet.
+> **Status:** the service scaffold and the official OAuth connection are implemented — a Rust workspace with typed configuration, structured telemetry, process-state endpoints (`/health/live`, `/health/ready`, `/metrics`, `/version`), the first-version `x_archive` schema, OAuth 2.0 Authorization Code with PKCE (one-time intents, callback validation, AES-256-GCM encrypted credentials, rotation-aware refresh with reuse detection, revocation, minimized read scopes with downgrade refusal), and durable per-account API budget gates. X API clients beyond the token endpoints, synchronization, post normalization, write-back, and legacy import are planned below and not implemented yet.
 
 > [!IMPORTANT]
 > **Ratatoskr is in development.** No database holds data that has to survive a schema change.
@@ -290,7 +290,7 @@ Every sync run records mode, pages, cursors, request budget, completeness, warni
 ## Initial milestones
 
 1. Define account, credential, post, bookmark, folder, and snapshot schemas.
-2. Implement OAuth PKCE and encrypted refresh-token storage.
+2. Implement OAuth PKCE and encrypted refresh-token storage. *(done)*
 3. Implement read-only bookmark pagination and post normalization.
 4. Add periodic complete snapshots and removal reconciliation.
 5. Add native folder synchronization.
@@ -305,4 +305,4 @@ Planned: `ratatoskr-workspace` will pin this service with compatible social cont
 
 ## Project status
 
-The first vertical slice from `docs/IMPLEMENTATION_PLAN.md` is in place: the workspace builds under a pinned toolchain, the gate runs fmt/clippy/tests/deny beside the OpenSpec checks (see `DEVELOPMENT.md`), and `schema.sql` defines the owned database shape. Everything that talks to X — OAuth, bookmark synchronization, normalization, events, compliance revalidation, and legacy migration — remains unimplemented.
+The first two vertical slices from `docs/IMPLEMENTATION_PLAN.md` are in place: the workspace builds under a pinned toolchain, the gate runs fmt/clippy/tests/deny beside the OpenSpec checks (see `DEVELOPMENT.md`), `schema.sql` defines the owned database shape, and the official OAuth 2.0 PKCE connection — encrypted credential envelopes, rotation with reuse detection, revocation, scope auditing, and per-account budget gates — is implemented and tested against recorded provider fixtures. Everything that still talks to X beyond the token endpoints — bookmark synchronization, normalization, events, compliance revalidation, and legacy migration — remains unimplemented.

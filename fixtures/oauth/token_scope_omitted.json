@@ -1,0 +1,6 @@
+{
+  "token_type": "bearer",
+  "expires_in": 7200,
+  "access_token": "PLACEHOLDER-access-token-scopeless",
+  "refresh_token": "PLACEHOLDER-refresh-token-scopeless"
+}

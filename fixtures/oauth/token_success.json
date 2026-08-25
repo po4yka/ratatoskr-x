@@ -1,0 +1,7 @@
+{
+  "token_type": "bearer",
+  "expires_in": 7200,
+  "access_token": "PLACEHOLDER-access-token-success",
+  "refresh_token": "PLACEHOLDER-refresh-token-success",
+  "scope": "users.read tweet.read bookmark.read offline.access"
+}

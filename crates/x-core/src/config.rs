@@ -22,6 +22,83 @@ pub struct XConfig {
     pub database: DatabaseConfig,
     /// Structured logging and metrics output.
     pub telemetry: TelemetryConfig,
+    /// Credential-protection settings.
+    pub security: SecurityConfig,
+    /// Provider OAuth client and consent settings.
+    pub oauth: OauthConfig,
+    /// Provider API request budget settings.
+    pub budgets: BudgetsConfig,
+}
+
+/// Credential-protection settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecurityConfig {
+    /// Base64url-encoded 32-byte token-encryption key; never logged, never persisted.
+    pub token_encryption_key: Option<SecretKey>,
+}
+
+/// The base64url-encoded token-encryption key material.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecretKey(pub String);
+
+impl std::fmt::Debug for SecretKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SecretKey([redacted])")
+    }
+}
+
+impl From<&str> for SecretKey {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+impl SecretKey {
+    /// Decodes the configured key material, accepting padded or unpadded base64url,
+    /// and yields exactly the 32 raw bytes the cipher needs; anything else is [`None`].
+    #[must_use]
+    pub fn decoded_key(&self) -> Option<[u8; 32]> {
+        use base64::Engine as _;
+        let raw = self.0.trim();
+        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(raw)
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(raw))
+            .ok()?;
+        decoded.try_into().ok()
+    }
+}
+
+/// Provider OAuth client and consent settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OauthConfig {
+    /// Provider authorization endpoint.
+    pub authorize_url: String,
+    /// Provider token endpoint, also used for revocation posting.
+    pub token_url: String,
+    /// Provider revocation endpoint (RFC 7009).
+    pub revocation_url: String,
+    /// Registered public/confidential client identifier; absent until provisioned.
+    pub client_id: Option<String>,
+    /// Confidential-client secret when the registration uses one; never logged.
+    pub client_secret: Option<String>,
+    /// Redirect URI registered with the provider; absent until provisioned.
+    pub redirect_uri: Option<String>,
+    /// The minimized read-consent scope set requested on connect.
+    pub read_scopes: Vec<String>,
+    /// How long an authorization intent stays usable, in seconds.
+    pub intent_ttl_seconds: u64,
+}
+
+/// Provider API request budget settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BudgetsConfig {
+    /// Request cost allowed per account per window before the gate refuses more.
+    pub request_cap_per_window: u32,
+    /// Length of one fixed budget window, in seconds.
+    pub window_seconds: u64,
 }
 
 /// Admin listener settings.
@@ -76,6 +153,28 @@ impl Default for XConfig {
                 log_format: LogFormat::Json,
                 log_filter: "info".to_owned(),
             },
+            security: SecurityConfig {
+                token_encryption_key: None,
+            },
+            oauth: OauthConfig {
+                authorize_url: "https://x.com/i/oauth2/authorize".to_owned(),
+                token_url: "https://api.x.com/2/oauth2/token".to_owned(),
+                revocation_url: "https://api.x.com/2/oauth2/token".to_owned(),
+                client_id: None,
+                client_secret: None,
+                redirect_uri: None,
+                read_scopes: vec![
+                    "users.read".to_owned(),
+                    "tweet.read".to_owned(),
+                    "bookmark.read".to_owned(),
+                    "offline.access".to_owned(),
+                ],
+                intent_ttl_seconds: 600,
+            },
+            budgets: BudgetsConfig {
+                request_cap_per_window: 1000,
+                window_seconds: 900,
+            },
         }
     }
 }
@@ -129,6 +228,51 @@ fn validate(config: &XConfig) -> Violations {
     }
     if config.telemetry.log_filter.trim().is_empty() {
         violations.push("telemetry.log_filter must not be empty");
+    }
+    if config
+        .security
+        .token_encryption_key
+        .as_ref()
+        .is_some_and(|key| key.decoded_key().is_none())
+    {
+        violations.push("security.token_encryption_key must be 32 raw bytes base64url-encoded");
+    }
+    for (name, url) in [
+        ("authorize_url", &config.oauth.authorize_url),
+        ("token_url", &config.oauth.token_url),
+        ("revocation_url", &config.oauth.revocation_url),
+    ] {
+        if url.trim().is_empty() {
+            violations.push(format!("oauth.{name} must not be empty"));
+        }
+    }
+    if config
+        .oauth
+        .client_id
+        .as_ref()
+        .is_some_and(String::is_empty)
+    {
+        violations.push("oauth.client_id must not be empty when set");
+    }
+    if config
+        .oauth
+        .redirect_uri
+        .as_ref()
+        .is_some_and(String::is_empty)
+    {
+        violations.push("oauth.redirect_uri must not be empty when set");
+    }
+    if config.oauth.intent_ttl_seconds == 0 {
+        violations.push("oauth.intent_ttl_seconds must be at least 1");
+    }
+    if config.oauth.read_scopes.is_empty() {
+        violations.push("oauth.read_scopes must list at least one scope");
+    }
+    if config.budgets.request_cap_per_window == 0 {
+        violations.push("budgets.request_cap_per_window must be at least 1");
+    }
+    if config.budgets.window_seconds == 0 {
+        violations.push("budgets.window_seconds must be at least 1");
     }
     violations
 }
