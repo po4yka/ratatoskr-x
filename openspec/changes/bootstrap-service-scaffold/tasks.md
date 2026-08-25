@@ -66,4 +66,4 @@ Integration tests in this section require a reachable PostgreSQL at `X_TEST_DATA
 - [x] 7.2 Update the README status paragraph to state that the service scaffold, health endpoints, typed config, telemetry, and first-version `x_archive` schema exist while OAuth, synchronization, and normalization remain unimplemented. Cannot start from a failing test: documentation.
 - [x] 7.3 Run the full local gate with a disposable Postgres container and capture evidence: `git diff --check`, `openspec validate --all --strict`, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo build --workspace --locked`, `cargo test --workspace --locked`, `cargo deny --locked check`, `cargo build --workspace --locked --release`.
 - [x] 7.4 With every box above ticked, commit the branch (Conventional Commits), archive the change via OpenSpec, and verify `openspec validate --archived`.
-- [ ] 7.5 Integrate: merge the branch into `main`, push `main` to the remote, delete the worktree and the task branch.
+- [x] 7.5 Integrate: merge the branch into `main`, push `main` to the remote, delete the worktree and the task branch.
