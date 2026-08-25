@@ -1350,6 +1350,8 @@ version = "0.1.0"
 dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
+ "ratatoskr-x-core",
+ "serde_json",
  "thiserror",
  "tracing",
  "tracing-subscriber",

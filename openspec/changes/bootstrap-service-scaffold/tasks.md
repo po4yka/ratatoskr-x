@@ -20,12 +20,12 @@ Every behaviour task is a pair: the first task adds a test that fails for the st
 
 ## 3. Structured telemetry (`x-telemetry`)
 
-- [ ] 3.1 RED: add `crates/x-telemetry/tests/telemetry.rs` with `unparsable_filter_returns_typed_error`: installing with filter `"lvl^[["` must return `Err(TelemetryError::Filter(..))`; make it fail with a stub that accepts any filter and returns `Ok`.
-- [ ] 3.2 GREEN: parse the filter with `EnvFilter::try_new` mapped to the typed error; the test passes.
-- [ ] 3.3 RED: add `json_events_render_message_and_level_to_captured_writer`: build telemetry with JSON format over an injected shared writer, emit `info!("bootstrap smoke")` under a thread-local dispatcher (`with_default`), and assert the captured line parses as a JSON object whose message is `bootstrap smoke` and level is `INFO`; make it fail with a stub capturing nothing.
-- [ ] 3.4 GREEN: assemble the registry + filter + `fmt` JSON layer writing through the injected `MakeWriter`; the test passes.
-- [ ] 3.5 RED: add `prometheus_recorder_renders_described_counter`: after building telemetry, increment a described counter `ratatoskr_x_bootstrap_total` by 1 and assert the guard's metrics render output contains it; make it fail while the stub provides no recorder.
-- [ ] 3.6 GREEN: install the Prometheus recorder in the guard (`PrometheusBuilder::install_recorder`) and expose `render()`; the test passes.
+- [x] 3.1 RED: add `crates/x-telemetry/tests/telemetry.rs` with `unparsable_filter_returns_typed_error`: installing with filter `"lvl^[["` must return `Err(TelemetryError::Filter(..))`; make it fail with a stub that accepts any filter and returns `Ok`.
+- [x] 3.2 GREEN: parse the filter with `EnvFilter::try_new` mapped to the typed error; the test passes.
+- [x] 3.3 RED: add `json_events_render_message_and_level_to_captured_writer`: build telemetry with JSON format over an injected shared writer, emit `info!("bootstrap smoke")` under a thread-local dispatcher (`with_default`), and assert the captured line parses as a JSON object whose message is `bootstrap smoke` and level is `INFO`; make it fail with a stub capturing nothing.
+- [x] 3.4 GREEN: assemble the registry + filter + `fmt` JSON layer writing through the injected `MakeWriter`; the test passes.
+- [x] 3.5 RED: add `prometheus_recorder_renders_described_counter`: after building telemetry, increment a described counter `ratatoskr_x_bootstrap_total` by 1 and assert the guard's metrics render output contains it; make it fail while the stub provides no recorder.
+- [x] 3.6 GREEN: install the Prometheus recorder in the guard (`PrometheusBuilder::install_recorder`) and expose `render()`; the test passes.
 
 ## 4. `x_archive` schema and persistence (`x-persistence`)
 
