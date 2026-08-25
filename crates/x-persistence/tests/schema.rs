@@ -10,15 +10,17 @@
 
 use x_persistence::database::Database;
 
-/// The fifteen tables the owned schema must contain, no more and no fewer.
+/// The seventeen tables the owned schema must contain, no more and no fewer.
 const OWNED_TABLES: &[&str] = &[
     "accounts",
+    "api_budget_windows",
     "bookmark_folder_items",
     "bookmark_folders",
     "bookmarks",
     "credentials",
     "inbox_events",
     "media",
+    "oauth_intents",
     "outbox_events",
     "post_relations",
     "posts",
@@ -169,6 +171,75 @@ async fn no_migration_bookkeeping_table_exists() {
     assert!(
         ledger_tables.is_empty(),
         "no migration bookkeeping may exist anywhere: {ledger_tables:?}"
+    );
+}
+
+#[tokio::test]
+async fn accounts_connection_state_is_constrained() {
+    let (url, name, admin) = create_disposable_database().await;
+    let database = Database::connect(&url, 2)
+        .await
+        .expect("a pooled connection");
+    database.apply_schema().await.expect("the schema applies");
+
+    sqlx::query("insert into x_archive.accounts (provider_user_id) values ('state-default-user')")
+        .execute(database.pool())
+        .await
+        .expect("the default connection state is accepted");
+    let stored: String = sqlx::query_scalar(
+        "select state from x_archive.accounts where provider_user_id = 'state-default-user'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the account row is readable");
+    let outside_vocabulary = sqlx::query(
+        "insert into x_archive.accounts (provider_user_id, state) \
+         values ('state-bogus-user', 'disconnected')",
+    )
+    .execute(database.pool())
+    .await;
+
+    database.pool().close().await;
+    drop_disposable_database(&name, &admin).await;
+    admin.close().await;
+
+    assert_eq!(stored, "connected", "accounts default to connected");
+    let error = outside_vocabulary.expect_err("a state outside the vocabulary must be rejected");
+    let code = match &error {
+        sqlx::Error::Database(database_error) => database_error.code(),
+        other => panic!("expected a database constraint error, got {other:?}"),
+    };
+    assert_eq!(
+        code.as_deref(),
+        Some("23514"),
+        "the rejection must come from the CHECK constraint"
+    );
+}
+
+#[tokio::test]
+async fn credentials_carry_superseded_refresh_hash_column() {
+    let (url, name, admin) = create_disposable_database().await;
+    let database = Database::connect(&url, 2)
+        .await
+        .expect("a pooled connection");
+    database.apply_schema().await.expect("the schema applies");
+
+    let present: bool = sqlx::query_scalar(
+        "select count(*) > 0 from information_schema.columns \
+         where table_schema = 'x_archive' and table_name = 'credentials' \
+           and column_name = 'superseded_refresh_hash' and data_type = 'text'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the column catalog is readable");
+
+    database.pool().close().await;
+    drop_disposable_database(&name, &admin).await;
+    admin.close().await;
+
+    assert!(
+        present,
+        "credentials must carry the superseded refresh token hash column"
     );
 }
 

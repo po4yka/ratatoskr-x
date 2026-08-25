@@ -8,6 +8,9 @@ CREATE SCHEMA IF NOT EXISTS x_archive;
 CREATE TABLE IF NOT EXISTS x_archive.accounts (
     id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     provider_user_id text NOT NULL UNIQUE,
+    state            text NOT NULL DEFAULT 'connected'
+        CHECK (state IN ('connected', 'refresh_required', 'reauth_required',
+                         'revoked', 'suspended', 'paused')),
     created_at       timestamptz NOT NULL DEFAULT now(),
     updated_at       timestamptz NOT NULL DEFAULT now()
 );
@@ -28,7 +31,35 @@ CREATE TABLE IF NOT EXISTS x_archive.credentials (
     granted_scopes    text[] NOT NULL,
     status            text NOT NULL CHECK (status IN ('active', 'expired', 'revoked')),
     expires_at        timestamptz,
+    superseded_refresh_hash text,
     created_at        timestamptz NOT NULL DEFAULT now()
+);
+
+-- One-time PKCE authorization intents. The lookup key is the SHA-256 digest of
+-- the OAuth state, so a database leak yields nothing directly usable; the code
+-- verifier rests encrypted beside it until the intent is consumed or expires.
+CREATE TABLE IF NOT EXISTS x_archive.oauth_intents (
+    id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    internal_user_id       uuid NOT NULL,
+    state_hash             text NOT NULL UNIQUE,
+    code_verifier_encrypted bytea NOT NULL,
+    nonce                  text NOT NULL,
+    redirect_uri           text NOT NULL,
+    requested_scopes       text[] NOT NULL,
+    created_at             timestamptz NOT NULL,
+    expires_at             timestamptz NOT NULL,
+    consumed_at            timestamptz
+);
+
+-- Fixed request-budget windows per account. Historical rows are immutable once
+-- a later window exists; the gate charges usage before any provider call.
+CREATE TABLE IF NOT EXISTS x_archive.api_budget_windows (
+    account_id     uuid NOT NULL REFERENCES x_archive.accounts (id),
+    window_start   timestamptz NOT NULL,
+    window_seconds integer NOT NULL CHECK (window_seconds > 0),
+    request_cap    integer NOT NULL CHECK (request_cap > 0),
+    used_requests  integer NOT NULL DEFAULT 0 CHECK (used_requests >= 0),
+    PRIMARY KEY (account_id, window_start)
 );
 
 CREATE TABLE IF NOT EXISTS x_archive.posts (
