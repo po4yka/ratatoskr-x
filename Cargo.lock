@@ -1922,6 +1922,7 @@ dependencies = [
 name = "ratatoskr-x-core"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "figment",
  "serde",
  "thiserror",
