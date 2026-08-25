@@ -42,16 +42,16 @@ Integration tests in this section require a reachable PostgreSQL at `X_TEST_DATA
 
 ## 5. Process-state endpoints (`x-http`)
 
-- [ ] 5.1 RED: add `crates/x-http/tests/admin.rs` with `live_reports_running_state`: `oneshot(GET /health/live)` must return 200 with body state `live`; make it fail with an empty router returning 404.
-- [ ] 5.2 GREEN: implement `admin_router` with the `/health/live` handler and lifecycle state; the test passes.
-- [ ] 5.3 RED: add `ready_tracks_initialization_and_names_checks`: before granting readiness `/health/ready` returns 503 naming the unmet `database` check, after granting it returns 200 reporting ready; make it fail against the current router.
-- [ ] 5.4 GREEN: implement named readiness checks and the atomic lifecycle transition; the test passes.
-- [ ] 5.5 RED: add `metrics_serves_prometheus_exposition`: with one recorded counter, `GET /metrics` responds with Prometheus text exposition content type and a body containing the counter; make it fail with a stub renderer emitting an empty body.
-- [ ] 5.6 GREEN: inject the real renderer closure from the telemetry handle; the test passes.
-- [ ] 5.7 RED: add `version_identifies_service_build`: `GET /version` reports service `ratatoskr-x`, the crate version, git sha fallback `unknown`, and the compiler version; make it fail with a stub returning wrong fields.
-- [ ] 5.8 GREEN: implement identity constants in `x-core` and the version handler; the test passes.
-- [ ] 5.9 RED: add `state_endpoints_disable_caching` asserting every one of the four endpoints answers with `Cache-Control: no-store`; make it fail while headers are unset.
-- [ ] 5.10 GREEN: add the `map_response` no-store middleware; the test passes.
+- [x] 5.1 RED: add `crates/x-http/tests/admin.rs` with `live_reports_running_state`: `oneshot(GET /health/live)` must return 200 with body state `live`; make it fail with an empty router returning 404.
+- [x] 5.2 GREEN: implement `admin_router` with the `/health/live` handler and lifecycle state; the test passes.
+- [x] 5.3 RED: add `ready_tracks_initialization_and_names_checks`: before granting readiness `/health/ready` returns 503 naming the unmet `database` check, after granting it returns 200 reporting ready; make it fail against the current router.
+- [x] 5.4 GREEN: implement named readiness checks and the atomic lifecycle transition; the test passes.
+- [x] 5.5 RED: add `metrics_serves_prometheus_exposition`: with one recorded counter, `GET /metrics` responds with Prometheus text exposition content type and a body containing the counter; make it fail with a stub renderer emitting an empty body.
+- [x] 5.6 GREEN: inject the real renderer closure from the telemetry handle; the test passes.
+- [x] 5.7 RED: add `version_identifies_service_build`: `GET /version` reports service `ratatoskr-x`, the crate version, git sha fallback `unknown`, and the compiler version; make it fail with a stub returning wrong fields.
+- [x] 5.8 GREEN: implement identity constants in `x-core` and the version handler; the test passes.
+- [x] 5.9 RED: add `state_endpoints_disable_caching` asserting every one of the four endpoints answers with `Cache-Control: no-store`; make it fail while headers are unset.
+- [x] 5.10 GREEN: add the `map_response` no-store middleware; the test passes.
 
 ## 6. Service binary bootstrap (`services/x`)
 
