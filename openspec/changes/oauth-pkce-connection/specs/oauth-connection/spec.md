@@ -49,12 +49,17 @@ A callback presenting an authorization code and a state SHALL be resolved agains
 
 ### Requirement: Code exchange and credential activation
 
-Exchanging an accepted intent SHALL send the authorization code with the stored verifier to the configured provider token endpoint, and on a successful response SHALL persist the returned access and refresh tokens only in encrypted form together with the exact granted scope list and the returned expiry, and SHALL mark the account connected. Provider HTTP shapes remain behind the service boundary.
+Exchanging an accepted intent SHALL send the authorization code with the stored verifier to the configured provider token endpoint, and on a successful response SHALL persist the returned access and refresh tokens only in encrypted form together with the exact granted scope list and the returned expiry, and SHALL mark the account connected. A token response that omits the scope parameter SHALL be treated as granting exactly the requested scopes, per RFC 6749. Provider HTTP shapes remain behind the service boundary.
 
 #### Scenario: Successful exchange stores encrypted tokens and granted scopes
 
 - **WHEN** the provider accepts the code and verifier and returns tokens, an expiry, and a scope list
 - **THEN** the stored credential payload decrypts to the returned token pair under the configured key, the recorded granted scope list equals the provider's response verbatim, the expiry is recorded, and the account reads as connected
+
+#### Scenario: Scope-less response means granted equals requested
+
+- **WHEN** the provider accepts the exchange and returns tokens without a scope parameter
+- **THEN** the connection activates with the requested read set recorded as granted, without any downgrade refusal
 
 ### Requirement: Scope minimization and downgrade refusal
 
@@ -72,7 +77,7 @@ The read-only connection SHALL request only the configured minimal read scope se
 
 ### Requirement: Encrypted credential storage at rest
 
-Credential payloads SHALL be sealed into a self-describing encrypted envelope with a leading format-version marker using AES-256-GCM under a key taken from configuration, SHALL bind each envelope to its owning account as authenticated data, and SHALL use a fresh nonce per sealing. The key SHALL never be written to the database or logs. Decryption SHALL reject tampered ciphertexts, foreign keys, envelopes relocated across accounts, and absent or malformed configuration keys with typed errors.
+Credential payloads SHALL be sealed into a self-describing encrypted envelope with a leading format-version marker using AES-256-GCM under a key taken from configuration, and SHALL use a fresh random nonce per sealing. Each envelope SHALL bind one owner and one purpose as authenticated data — the account for credential envelopes, the requesting internal user for authorization-intent verifier envelopes — so an envelope only opens when the opener supplies the same owner and purpose from trusted context. The key SHALL never be written to the database or logs. Decryption SHALL reject tampered ciphertexts, foreign keys, envelopes presented under a different owner or purpose, envelopes with an unrecognized format version, and absent or malformed configuration keys with typed errors.
 
 #### Scenario: Round trip preserves the plaintext
 
@@ -89,24 +94,39 @@ Credential payloads SHALL be sealed into a self-describing encrypted envelope wi
 - **WHEN** a sealed envelope is opened under a different valid key
 - **THEN** opening fails with an authentication error
 
-#### Scenario: Envelope does not survive account relocation
+#### Scenario: Envelope does not survive owner relocation
 
-- **WHEN** a sealed envelope is opened with its original key but attributed to a different account
+- **WHEN** a sealed envelope is opened with its original key but attributed to a different account than it was sealed for, or an intent-verifier envelope is attributed to a different internal user
 - **THEN** opening fails with the binding error
 
-#### Scenario: Missing key is a typed configuration failure
+#### Scenario: Purpose confusion is rejected
 
-- **WHEN** sealing or opening is attempted without a usable configured key
-- **THEN** the operation fails with a typed key-missing error and no fallback key is generated
+- **WHEN** an intent-verifier envelope is opened expecting the credential purpose, or a credential envelope is opened expecting the intent-verifier purpose
+- **THEN** opening fails with the binding error even though owner and key match
+
+#### Scenario: Unknown envelope version is refused
+
+- **WHEN** an envelope whose leading format marker names no implemented version is opened
+- **THEN** opening fails with a typed version error and no decryption attempt is made
+
+#### Scenario: Missing or malformed key is a typed configuration failure
+
+- **WHEN** sealing or opening is attempted without a configured key, or with a configured value that is not 32 bytes of valid base64url
+- **THEN** the operation fails with a typed key error naming the problem, and no fallback key is generated
 
 ### Requirement: Refresh with rotation and reuse detection
 
-Refreshing credentials SHALL present the currently stored refresh token, swap in the returned access and refresh tokens atomically, and retain a hash of the immediately retired refresh token. Presenting a refresh token whose hash equals the retained retired hash SHALL be treated as reuse: the credential family is revoked, secret material is scrubbed, and the account requires reauthorization. Presenting a refresh token that matches neither the current nor the retired token SHALL be refused without disturbing the stored credential. An upstream rejection of the current refresh token SHALL mark the account as requiring reauthorization, while transport-level failures SHALL leave stored state untouched.
+Refreshing credentials SHALL be serialized per account so that concurrent refresh attempts cannot race: each attempt classifies the presented token against the currently stored refresh token and the retained retired-token hash while holding exclusive access to the credential row, calls the provider, and swaps in the returned access and refresh tokens atomically before releasing it. The hash of the immediately retired refresh token SHALL be retained after rotation. Presenting a refresh token whose hash equals the retained retired hash SHALL be treated as reuse: the credential family is revoked, secret material is scrubbed, and the account requires reauthorization. Presenting a refresh token that matches neither the current nor the retired token SHALL be refused without disturbing the stored credential. A refresh attempt against a credential that is not active SHALL be refused locally without any provider contact. An upstream rejection of the current refresh token SHALL mark the account as requiring reauthorization, while transport-level failures SHALL leave stored state untouched.
 
 #### Scenario: Refresh rotates both tokens atomically
 
 - **WHEN** a refresh succeeds against the provider for the currently stored refresh token
 - **THEN** the stored payload decrypts to the newly returned token pair, the retired token's hash is recorded, and no intermediate state exposes either the old access token alone or a mismatched token pair
+
+#### Scenario: Concurrent refreshes serialize without false revocation
+
+- **WHEN** two refreshes for one account run concurrently
+- **THEN** both complete against the provider in serialized order using the token current at their turn, and neither attempt produces a reuse classification, family revocation, or reauth-required state
 
 #### Scenario: Retired refresh token reuse revokes the family
 
@@ -117,6 +137,11 @@ Refreshing credentials SHALL present the currently stored refresh token, swap in
 
 - **WHEN** a refresh presents a token that matches neither the stored nor the retired refresh token
 - **THEN** the attempt is refused as stale, and the stored credential remains active and unchanged
+
+#### Scenario: Inactive credential refuses refresh without provider contact
+
+- **WHEN** a refresh is attempted for an account whose credential status is revoked or expired
+- **THEN** the attempt is refused locally with the typed inactive error and the provider receives no request
 
 #### Scenario: Upstream invalidation is distinct from transient failure
 
@@ -139,9 +164,14 @@ Revoking a connection SHALL notify the provider's revocation endpoint with the c
 
 ### Requirement: Credential secrecy in diagnostics
 
-Typed OAuth errors and their rendered operator messages SHALL NOT contain token values, verifier values, or decrypted payload contents. A diagnostic rendering of any credential-flow error can be checked against the secret inputs that produced it.
+Typed OAuth errors, their rendered operator messages, and the debug renderings of credential payload types SHALL NOT contain token values, verifier values, or decrypted payload contents. A diagnostic rendering of any credential-flow value can be checked against the secret inputs that produced it.
 
 #### Scenario: Error renderings exclude secret inputs
 
 - **WHEN** any credential-flow operation fails with secret values in play and the resulting error is rendered for operators
 - **THEN** none of the secret input strings appear in the rendering
+
+#### Scenario: Payload debug rendering excludes token material
+
+- **WHEN** a decrypted credential or intent-verifier value is formatted with its `Debug` implementation while holding known marker secrets
+- **THEN** none of the marker secrets appear in the rendered output
