@@ -9,6 +9,7 @@ members = [
     "crates/x-oauth",
     "crates/x-budget",
     "crates/x-normalize",
+    "crates/x-sync",
 ]
 
 [workspace.package]
@@ -27,6 +28,7 @@ ratatoskr-x-oauth = { version = "0.1.0", path = "crates/x-oauth" }
 ratatoskr-x-budget = { version = "0.1.0", path = "crates/x-budget" }
 ratatoskr-x-telemetry = { version = "0.1.0", path = "crates/x-telemetry" }
 ratatoskr-x-normalize = { version = "0.1.0", path = "crates/x-normalize" }
+ratatoskr-x-sync = { version = "0.1.0", path = "crates/x-sync" }
 
 aes-gcm = { version = "=0.11.1", default-features = false, features = ["aes", "alloc"] }
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }

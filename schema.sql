@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS x_archive.bookmarks (
     first_observed_saved_at timestamptz NOT NULL DEFAULT now(),
     last_observed_saved_at  timestamptz NOT NULL DEFAULT now(),
     observed_removed_at     timestamptz,
+    observed_removed_snapshot_id uuid,
     UNIQUE (account_id, post_id)
 );
 
@@ -149,6 +150,12 @@ CREATE TABLE IF NOT EXISTS x_archive.sync_runs (
         CHECK (run_type IN ('incremental', 'full', 'folder_listing', 'folder_membership',
                             'compliance_revalidation')),
     state      text NOT NULL CHECK (state IN ('running', 'completed', 'failed', 'cancelled')),
+    checkpoint text,
+    pages_fetched integer NOT NULL DEFAULT 0 CHECK (pages_fetched >= 0),
+    items_observed integer NOT NULL DEFAULT 0 CHECK (items_observed >= 0),
+    added_count integer NOT NULL DEFAULT 0 CHECK (added_count >= 0),
+    retained_count integer NOT NULL DEFAULT 0 CHECK (retained_count >= 0),
+    removed_count integer NOT NULL DEFAULT 0 CHECK (removed_count >= 0),
     started_at timestamptz NOT NULL DEFAULT now(),
     finished_at timestamptz
 );
@@ -159,6 +166,37 @@ CREATE TABLE IF NOT EXISTS x_archive.snapshots (
     complete     boolean NOT NULL DEFAULT false,
     completed_at timestamptz,
     page_count   integer NOT NULL DEFAULT 0
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'bookmarks_observed_removed_snapshot_id_fkey'
+          AND conrelid = 'x_archive.bookmarks'::regclass
+    ) THEN
+        ALTER TABLE x_archive.bookmarks
+            ADD CONSTRAINT bookmarks_observed_removed_snapshot_id_fkey
+            FOREIGN KEY (observed_removed_snapshot_id) REFERENCES x_archive.snapshots (id);
+    END IF;
+END $$;
+
+-- Candidate membership is durable while a full snapshot is resumable, but it
+-- has no current-state authority until the completion transaction swaps it in.
+CREATE TABLE IF NOT EXISTS x_archive.snapshot_bookmark_items (
+    snapshot_id uuid NOT NULL REFERENCES x_archive.snapshots (id),
+    post_id     uuid NOT NULL REFERENCES x_archive.posts (id),
+    observed_at timestamptz NOT NULL,
+    PRIMARY KEY (snapshot_id, post_id)
+);
+
+-- Exactly one complete snapshot is current for each account. The final
+-- reconciliation transaction changes this pointer only after all rows and
+-- statistics for that snapshot are durable.
+CREATE TABLE IF NOT EXISTS x_archive.bookmark_snapshot_authority (
+    account_id  uuid PRIMARY KEY REFERENCES x_archive.accounts (id),
+    snapshot_id uuid NOT NULL REFERENCES x_archive.snapshots (id),
+    updated_at  timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS x_archive.rate_limit_state (

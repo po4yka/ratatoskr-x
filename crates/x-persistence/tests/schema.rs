@@ -10,12 +10,13 @@
 
 use x_persistence::database::Database;
 
-/// The seventeen tables the owned schema must contain, no more and no fewer.
+/// The nineteen tables the owned schema must contain, no more and no fewer.
 const OWNED_TABLES: &[&str] = &[
     "accounts",
     "api_budget_windows",
     "bookmark_folder_items",
     "bookmark_folders",
+    "bookmark_snapshot_authority",
     "bookmarks",
     "credentials",
     "inbox_events",
@@ -25,6 +26,7 @@ const OWNED_TABLES: &[&str] = &[
     "post_relations",
     "posts",
     "rate_limit_state",
+    "snapshot_bookmark_items",
     "snapshots",
     "sync_runs",
     "tombstones",
@@ -330,6 +332,61 @@ async fn normalization_targets_stamp_parser_version() {
     assert!(
         missing.is_empty(),
         "normalization targets must stamp their parser version; missing {missing:?}"
+    );
+}
+
+#[tokio::test]
+async fn snapshot_authority_schema_carries_staging_checkpoints_and_statistics() {
+    let (url, name, admin) = create_disposable_database().await;
+    let database = Database::connect(&url, 2)
+        .await
+        .expect("a pooled connection");
+    database.apply_schema().await.expect("the schema applies");
+
+    let mut missing = Vec::new();
+    for table in ["snapshot_bookmark_items", "bookmark_snapshot_authority"] {
+        let present = sqlx::query_scalar::<_, bool>(
+            "select count(*) > 0 from information_schema.tables \
+             where table_schema = 'x_archive' and table_name = $1",
+        )
+        .bind(table)
+        .fetch_one(database.pool())
+        .await
+        .expect("the table catalog is readable");
+        if !present {
+            missing.push(format!("table {table}"));
+        }
+    }
+    for (table, column) in [
+        ("sync_runs", "checkpoint"),
+        ("sync_runs", "pages_fetched"),
+        ("sync_runs", "items_observed"),
+        ("sync_runs", "added_count"),
+        ("sync_runs", "retained_count"),
+        ("sync_runs", "removed_count"),
+        ("bookmarks", "observed_removed_snapshot_id"),
+    ] {
+        let present = sqlx::query_scalar::<_, bool>(
+            "select count(*) > 0 from information_schema.columns \
+             where table_schema = 'x_archive' and table_name = $1 and column_name = $2",
+        )
+        .bind(table)
+        .bind(column)
+        .fetch_one(database.pool())
+        .await
+        .expect("the column catalog is readable");
+        if !present {
+            missing.push(format!("{table}.{column}"));
+        }
+    }
+
+    database.pool().close().await;
+    drop_disposable_database(&name, &admin).await;
+    admin.close().await;
+
+    assert!(
+        missing.is_empty(),
+        "snapshot authority needs staging, checkpoint, statistics, and removal evidence; missing {missing:?}"
     );
 }
 

@@ -9,6 +9,8 @@
     reason = "assertions in a test binary"
 )]
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use proptest::prelude::*;
 use serde_json::{Value, json};
 use x_normalize::dto::Envelope;
@@ -122,12 +124,14 @@ fn post() -> impl Strategy<Value = GeneratedPost> {
                 if let Some(media_key) = media_key {
                     object.insert("attachments".to_owned(), json!({"media_keys": [media_key]}));
                 }
-                let mut injected: InjectedMembers = Vec::new();
+                let mut injected = BTreeMap::new();
                 for (key, value) in unknowns {
-                    injected.push((key.clone(), value.clone()));
+                    // JSON objects contain one value per member name. Retain
+                    // the final value emitted into the generated payload.
+                    injected.insert(key.clone(), value.clone());
                     object.insert(key, value);
                 }
-                (Value::Object(object), injected)
+                (Value::Object(object), injected.into_iter().collect())
             },
         )
 }
@@ -178,6 +182,27 @@ fn envelope_strategy() -> impl Strategy<Value = (Value, Vec<InjectedMembers>)> {
             (posts, users, media)
         })
         .prop_map(|(posts, users, media)| {
+            // Provider post identity is unique within one API response. Keep
+            // the generator faithful to that contract so the property checks
+            // preservation rather than accidentally comparing two different
+            // payloads that share one provider identity.
+            let mut seen_post_ids = BTreeSet::new();
+            let mut posts: Vec<GeneratedPost> = posts
+                .into_iter()
+                .filter(|(payload, _)| {
+                    payload
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| seen_post_ids.insert(id.to_owned()))
+                })
+                .collect();
+            // `normalize` orders records by provider identity. Align the
+            // paired property expectation with that documented output order.
+            posts.sort_by(|(left, _), (right, _)| {
+                left.get("id")
+                    .and_then(Value::as_str)
+                    .cmp(&right.get("id").and_then(Value::as_str))
+            });
             let expected_unknowns: Vec<InjectedMembers> =
                 posts.iter().map(|(_, injected)| injected.clone()).collect();
             let payload_posts: Vec<Value> = posts.into_iter().map(|(payload, _)| payload).collect();

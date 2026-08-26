@@ -1,0 +1,29 @@
+[package]
+name = "ratatoskr-x-sync"
+description = "Authoritative, resumable full bookmark snapshots from the official X API"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[lib]
+name = "x_sync"
+path = "src/lib.rs"
+
+[dependencies]
+chrono.workspace                    = true
+ratatoskr-x-budget.workspace        = true
+ratatoskr-x-normalize.workspace     = true
+ratatoskr-x-persistence.workspace   = true
+sqlx.workspace                      = true
+thiserror.workspace                 = true
+uuid.workspace                      = true
+
+[dev-dependencies]
+ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
+serde_json.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

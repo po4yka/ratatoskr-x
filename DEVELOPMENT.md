@@ -2,7 +2,7 @@
 
 > Status: Active. Last reviewed: 2026-08-25
 
-The first scaffold is implemented: a Rust workspace with typed configuration, structured telemetry, process-state endpoints, and the first-version `x_archive` schema. The official OAuth 2.0 Authorization Code connection with PKCE — encrypted credential envelopes, rotation-aware refresh with reuse detection, revocation, scope auditing — and the durable per-account API budget gate are implemented. Bookmark synchronization, post normalization, and the legacy importer are not.
+The first scaffold is implemented: a Rust workspace with typed configuration, structured telemetry, process-state endpoints, and the first-version `x_archive` schema. The official OAuth 2.0 Authorization Code connection with PKCE — encrypted credential envelopes, rotation-aware refresh with reuse detection, revocation, scope auditing — and the durable per-account API budget gate are implemented. Official-payload post normalization and complete bookmark snapshots with durable checkpoints, atomic authority, and observed removals are implemented. The HTTP adapter, frequent partial scan, folder synchronization, and legacy importer are not.
 
 ## Toolchain
 

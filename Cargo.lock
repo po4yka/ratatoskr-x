@@ -2041,6 +2041,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatoskr-x-sync"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ratatoskr-x-budget",
+ "ratatoskr-x-normalize",
+ "ratatoskr-x-persistence",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "ratatoskr-x-telemetry"
 version = "0.1.0"
 dependencies = [
