@@ -1,0 +1,35 @@
+{
+  "data": [
+    {
+      "id": "700800900",
+      "text": "Fixture article-backed post with a truncated teaser link.",
+      "created_at": "2026-08-06T14:00:00.000Z",
+      "author_id": "9007",
+      "conversation_id": "700800900",
+      "note_tweet": {
+        "text": "The full long-form body of the fixture article-backed post, which is much longer than the canonical short text and therefore travels in the note_tweet member.",
+        "entities": {
+          "urls": []
+        }
+      },
+      "article": {
+        "title": "Fixture Article Title",
+        "cover_media": {
+          "media_key": "7_1000000000000000003"
+        }
+      },
+      "edit_history_tweet_ids": [
+        "700800900"
+      ]
+    }
+  ],
+  "includes": {
+    "users": [
+      {
+        "id": "9007",
+        "name": "Fixture Longform Author",
+        "username": "fixture_longform_author"
+      }
+    ]
+  }
+}

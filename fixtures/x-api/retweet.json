@@ -1,0 +1,29 @@
+{
+  "data": [
+    {
+      "id": "500600700",
+      "text": "RT @fixture_original: the reposted wording lives with the target.",
+      "created_at": "2026-08-04T11:00:00.000Z",
+      "author_id": "9005",
+      "conversation_id": "500600700",
+      "referenced_tweets": [
+        {
+          "type": "retweeted",
+          "id": "555666777"
+        }
+      ],
+      "edit_history_tweet_ids": [
+        "500600700"
+      ]
+    }
+  ],
+  "includes": {
+    "users": [
+      {
+        "id": "9005",
+        "name": "Fixture Reposter",
+        "username": "fixture_reposter"
+      }
+    ]
+  }
+}

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS x_archive.users (
     provider_id  text NOT NULL UNIQUE,
     username     text,
     display_name text,
+    parser_version integer NOT NULL,
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now()
 );
@@ -71,6 +72,18 @@ CREATE TABLE IF NOT EXISTS x_archive.posts (
     language       text,
     published_at   timestamptz,
     edited_at      timestamptz,
+    -- Linkage evidence, not a foreign key: thread reconstruction joins on it
+    -- without trusting referential integrity.
+    conversation_provider_id text,
+    -- Public metric counts as last observed; NULL means the provider never
+    -- stated a value. Absence is not zero.
+    like_count       bigint,
+    retweet_count    bigint,
+    reply_count      bigint,
+    quote_count      bigint,
+    bookmark_count   bigint,
+    impression_count bigint,
+    parser_version   integer NOT NULL,
     availability   text NOT NULL DEFAULT 'active'
         CHECK (availability IN ('active', 'deleted', 'protected', 'author_suspended',
                                 'unavailable', 'unknown')),
@@ -84,6 +97,9 @@ CREATE TABLE IF NOT EXISTS x_archive.post_relations (
     post_id                uuid NOT NULL REFERENCES x_archive.posts (id) ON DELETE CASCADE,
     related_post_provider_id text NOT NULL,
     relation               text NOT NULL CHECK (relation IN ('reply', 'quote', 'repost')),
+    -- Unconstrained by design: the referenced post may be absent from the same
+    -- batch, so this column keys provider identity, not local rows.
+    parser_version         integer NOT NULL,
     UNIQUE (post_id, related_post_provider_id, relation)
 );
 
@@ -93,7 +109,9 @@ CREATE TABLE IF NOT EXISTS x_archive.media (
     provider_id text NOT NULL,
     kind        text CHECK (kind IN ('photo', 'video', 'animated_gif')),
     metadata    jsonb NOT NULL DEFAULT '{}',
+    -- Metadata references only; media bytes are never downloaded here.
     blob_ref    text,
+    parser_version integer NOT NULL,
     UNIQUE (post_id, provider_id)
 );
 

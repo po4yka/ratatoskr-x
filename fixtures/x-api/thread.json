@@ -1,0 +1,63 @@
+{
+  "data": [
+    {
+      "id": "300400500",
+      "text": "Thread root: normalization begins with official payloads.",
+      "created_at": "2026-08-02T09:00:00.000Z",
+      "author_id": "9002",
+      "conversation_id": "300400500",
+      "lang": "en",
+      "edit_history_tweet_ids": [
+        "300400500"
+      ]
+    },
+    {
+      "id": "300400501",
+      "text": "Reply one: authors resolve batch-wide from includes.users.",
+      "created_at": "2026-08-02T09:05:00.000Z",
+      "author_id": "9003",
+      "conversation_id": "300400500",
+      "in_reply_to_user_id": "9002",
+      "referenced_tweets": [
+        {
+          "type": "replied_to",
+          "id": "300400500"
+        }
+      ],
+      "edit_history_tweet_ids": [
+        "300400501"
+      ]
+    },
+    {
+      "id": "300400502",
+      "text": "Reply two: relations key parents by provider id.",
+      "created_at": "2026-08-02T09:10:00.000Z",
+      "author_id": "9002",
+      "conversation_id": "300400500",
+      "in_reply_to_user_id": "9003",
+      "referenced_tweets": [
+        {
+          "type": "replied_to",
+          "id": "300400501"
+        }
+      ],
+      "edit_history_tweet_ids": [
+        "300400502"
+      ]
+    }
+  ],
+  "includes": {
+    "users": [
+      {
+        "id": "9002",
+        "name": "Thread Starter",
+        "username": "thread_starter"
+      },
+      {
+        "id": "9003",
+        "name": "Thread Replier",
+        "username": "thread_replier"
+      }
+    ]
+  }
+}

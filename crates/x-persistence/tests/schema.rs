@@ -244,6 +244,96 @@ async fn credentials_carry_superseded_refresh_hash_column() {
 }
 
 #[tokio::test]
+async fn posts_carry_conversation_counts_and_parser_columns() {
+    let (url, name, admin) = create_disposable_database().await;
+    let database = Database::connect(&url, 2)
+        .await
+        .expect("a pooled connection");
+    database.apply_schema().await.expect("the schema applies");
+
+    let mut missing = Vec::new();
+    for (column, data_type) in [
+        ("conversation_provider_id", "text"),
+        ("like_count", "bigint"),
+        ("retweet_count", "bigint"),
+        ("reply_count", "bigint"),
+        ("quote_count", "bigint"),
+        ("bookmark_count", "bigint"),
+        ("impression_count", "bigint"),
+    ] {
+        let present = sqlx::query_scalar::<_, bool>(
+            "select count(*) > 0 from information_schema.columns \
+             where table_schema = 'x_archive' and table_name = 'posts' \
+               and column_name = $1 and data_type = $2 and is_nullable = 'YES'",
+        )
+        .bind(column)
+        .bind(data_type)
+        .fetch_one(database.pool())
+        .await
+        .expect("the posts column catalog is readable");
+        if !present {
+            missing.push(format!("posts.{column} {data_type} nullable"));
+        }
+    }
+    let parser_version = sqlx::query_scalar::<_, bool>(
+        "select count(*) > 0 from information_schema.columns \
+         where table_schema = 'x_archive' and table_name = 'posts' \
+           and column_name = 'parser_version' and data_type = 'integer' \
+           and is_nullable = 'NO'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the posts parser-version column is checkable");
+    if !parser_version {
+        missing.push("posts.parser_version integer not-null".to_owned());
+    }
+
+    database.pool().close().await;
+    drop_disposable_database(&name, &admin).await;
+    admin.close().await;
+
+    assert!(
+        missing.is_empty(),
+        "posts must carry conversation, count, and parser columns; missing {missing:?}"
+    );
+}
+
+#[tokio::test]
+async fn normalization_targets_stamp_parser_version() {
+    let (url, name, admin) = create_disposable_database().await;
+    let database = Database::connect(&url, 2)
+        .await
+        .expect("a pooled connection");
+    database.apply_schema().await.expect("the schema applies");
+
+    let mut missing = Vec::new();
+    for table in ["users", "post_relations", "media"] {
+        let present = sqlx::query_scalar::<_, bool>(
+            "select count(*) > 0 from information_schema.columns \
+             where table_schema = 'x_archive' and table_name = $1 \
+               and column_name = 'parser_version' and data_type = 'integer' \
+               and is_nullable = 'NO'",
+        )
+        .bind(table)
+        .fetch_one(database.pool())
+        .await
+        .expect("the parser-version column is checkable");
+        if !present {
+            missing.push(format!("{table}.parser_version integer not-null"));
+        }
+    }
+
+    database.pool().close().await;
+    drop_disposable_database(&name, &admin).await;
+    admin.close().await;
+
+    assert!(
+        missing.is_empty(),
+        "normalization targets must stamp their parser version; missing {missing:?}"
+    );
+}
+
+#[tokio::test]
 async fn constraints_stay_within_x_archive_boundary() {
     let (url, name, admin) = create_disposable_database().await;
     let database = Database::connect(&url, 2)
