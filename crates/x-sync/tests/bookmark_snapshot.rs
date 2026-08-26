@@ -82,6 +82,45 @@ fn service(database: x_persistence::database::Database) -> BookmarkSnapshotServi
     service_with_budget(database, 10)
 }
 
+async fn repair_count(
+    test: &TestDatabase,
+    snapshot_id: uuid::Uuid,
+    account_id: uuid::Uuid,
+    post_id: uuid::Uuid,
+) -> i64 {
+    sqlx::query_scalar(
+        "select count(*) from x_archive.bookmark_reconciliation_repairs \
+         where snapshot_id = $1 and bookmark_id = ( \
+           select id from x_archive.bookmarks where account_id = $2 and post_id = $3
+         )",
+    )
+    .bind(snapshot_id)
+    .bind(account_id)
+    .bind(post_id)
+    .fetch_one(test.database.pool())
+    .await
+    .expect("the repair evidence is readable")
+}
+
+async fn replay_repair(
+    test: &TestDatabase,
+    snapshot_id: uuid::Uuid,
+    account_id: uuid::Uuid,
+    post_id: uuid::Uuid,
+) {
+    sqlx::query(
+        "insert into x_archive.bookmark_reconciliation_repairs (snapshot_id, bookmark_id, reason) \
+         values ($1, (select id from x_archive.bookmarks where account_id = $2 and post_id = $3), \
+         'incremental_drift') on conflict (snapshot_id, bookmark_id) do nothing",
+    )
+    .bind(snapshot_id)
+    .bind(account_id)
+    .bind(post_id)
+    .execute(test.database.pool())
+    .await
+    .expect("replaying the repair evidence is idempotent");
+}
+
 fn service_with_budget(
     database: x_persistence::database::Database,
     request_cap: u32,
@@ -292,7 +331,33 @@ async fn records_unbookmark_observation_without_deleting_the_bookmark() {
         .seed_account("unbookmark-observation-account")
         .await
         .expect("the account seeds");
+    sqlx::query(
+        "insert into x_archive.bookmark_incremental_state (account_id, requires_full_snapshot) \
+         values ($1, true)",
+    )
+    .bind(account)
+    .execute(test.database.pool())
+    .await
+    .expect("the full-snapshot escalation state seeds");
     let (_, old_post) = seed_previous_authority(&test, account, "old-post").await;
+    let incremental_run: uuid::Uuid = sqlx::query_scalar(
+        "insert into x_archive.sync_runs (account_id, run_type, state, finished_at) \
+         values ($1, 'incremental', 'completed', now()) returning id",
+    )
+    .bind(account)
+    .fetch_one(test.database.pool())
+    .await
+    .expect("the incremental observation run seeds");
+    sqlx::query(
+        "update x_archive.bookmarks set last_incremental_run_id = $3 \
+         where account_id = $1 and post_id = $2",
+    )
+    .bind(account)
+    .bind(old_post)
+    .bind(incremental_run)
+    .execute(test.database.pool())
+    .await
+    .expect("the incremental provenance seeds");
     let snapshot_service = service(test.database.clone());
     let source = FakeBookmarkPageSource::new(vec![Ok(page("new-post", None))]);
 
@@ -324,6 +389,16 @@ async fn records_unbookmark_observation_without_deleting_the_bookmark() {
     .fetch_one(test.database.pool())
     .await
     .expect("the bookmark row count is readable");
+    let repairs = repair_count(&test, evidence_snapshot, account, old_post).await;
+    replay_repair(&test, evidence_snapshot, account, old_post).await;
+    let repairs_after_replay = repair_count(&test, evidence_snapshot, account, old_post).await;
+    let requires_full_snapshot: bool = sqlx::query_scalar(
+        "select requires_full_snapshot from x_archive.bookmark_incremental_state where account_id = $1",
+    )
+    .bind(account)
+    .fetch_one(test.database.pool())
+    .await
+    .expect("the cleared escalation state is readable");
 
     test.cleanup().await.expect("cleanup drops the database");
 
@@ -334,6 +409,18 @@ async fn records_unbookmark_observation_without_deleting_the_bookmark() {
     assert_eq!(
         rows, 1,
         "an unbookmark observation never deletes the bookmark row"
+    );
+    assert_eq!(
+        repairs, 1,
+        "the full snapshot records one incremental-drift repair"
+    );
+    assert_eq!(
+        repairs_after_replay, 1,
+        "the repair key makes a repeated reconciliation insert idempotent"
+    );
+    assert!(
+        !requires_full_snapshot,
+        "a complete snapshot clears the incremental full-rescan requirement"
     );
 }
 

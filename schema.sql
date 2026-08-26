@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS x_archive.bookmarks (
     last_observed_saved_at  timestamptz NOT NULL DEFAULT now(),
     observed_removed_at     timestamptz,
     observed_removed_snapshot_id uuid,
+    last_incremental_run_id uuid,
     UNIQUE (account_id, post_id)
 );
 
@@ -198,6 +199,45 @@ CREATE TABLE IF NOT EXISTS x_archive.bookmark_snapshot_authority (
     snapshot_id uuid NOT NULL REFERENCES x_archive.snapshots (id),
     updated_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- Head scans are observation-only. Their watermark is a provider post identity,
+-- not an invented bookmark timestamp, and a detected gap requires the next run
+-- to use complete-snapshot authority.
+CREATE TABLE IF NOT EXISTS x_archive.bookmark_incremental_state (
+    account_id                  uuid PRIMARY KEY REFERENCES x_archive.accounts (id),
+    watermark_provider_post_id  text,
+    requires_full_snapshot      boolean NOT NULL DEFAULT false,
+    last_outcome                text NOT NULL DEFAULT 'idle'
+        CHECK (last_outcome IN ('idle', 'completed', 'gap', 'budget_exhausted',
+                                'provider_unavailable', 'request_cap',
+                                'full_snapshot_required')),
+    last_incremental_run_id     uuid REFERENCES x_archive.sync_runs (id),
+    updated_at                  timestamptz NOT NULL DEFAULT now()
+);
+
+-- A full snapshot may correct an active observation made by a prior head scan.
+-- The completing snapshot and bookmark identify one durable repair, so commit
+-- recovery and reconciliation retries cannot manufacture duplicate evidence.
+CREATE TABLE IF NOT EXISTS x_archive.bookmark_reconciliation_repairs (
+    snapshot_id  uuid NOT NULL REFERENCES x_archive.snapshots (id),
+    bookmark_id  uuid NOT NULL REFERENCES x_archive.bookmarks (id),
+    reason       text NOT NULL CHECK (reason IN ('incremental_drift')),
+    recorded_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (snapshot_id, bookmark_id)
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'bookmarks_last_incremental_run_id_fkey'
+          AND conrelid = 'x_archive.bookmarks'::regclass
+    ) THEN
+        ALTER TABLE x_archive.bookmarks
+            ADD CONSTRAINT bookmarks_last_incremental_run_id_fkey
+            FOREIGN KEY (last_incremental_run_id) REFERENCES x_archive.sync_runs (id);
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS x_archive.rate_limit_state (
     account_id uuid PRIMARY KEY REFERENCES x_archive.accounts (id),

@@ -10,12 +10,14 @@
 
 use x_persistence::database::Database;
 
-/// The nineteen tables the owned schema must contain, no more and no fewer.
+/// The twenty-one tables the owned schema must contain, no more and no fewer.
 const OWNED_TABLES: &[&str] = &[
     "accounts",
     "api_budget_windows",
     "bookmark_folder_items",
     "bookmark_folders",
+    "bookmark_incremental_state",
+    "bookmark_reconciliation_repairs",
     "bookmark_snapshot_authority",
     "bookmarks",
     "credentials",
@@ -387,6 +389,73 @@ async fn snapshot_authority_schema_carries_staging_checkpoints_and_statistics() 
     assert!(
         missing.is_empty(),
         "snapshot authority needs staging, checkpoint, statistics, and removal evidence; missing {missing:?}"
+    );
+}
+
+#[tokio::test]
+async fn incremental_scan_schema_carries_watermark_escalation_and_unique_repairs() {
+    let (url, name, admin) = create_disposable_database().await;
+    let database = Database::connect(&url, 2)
+        .await
+        .expect("a pooled connection");
+    database.apply_schema().await.expect("the schema applies");
+
+    let mut missing = Vec::new();
+    for table in [
+        "bookmark_incremental_state",
+        "bookmark_reconciliation_repairs",
+    ] {
+        let present = sqlx::query_scalar::<_, bool>(
+            "select count(*) > 0 from information_schema.tables \
+             where table_schema = 'x_archive' and table_name = $1",
+        )
+        .bind(table)
+        .fetch_one(database.pool())
+        .await
+        .expect("the table catalog is readable");
+        if !present {
+            missing.push(format!("table {table}"));
+        }
+    }
+    for column in [
+        "watermark_provider_post_id",
+        "requires_full_snapshot",
+        "last_outcome",
+        "last_incremental_run_id",
+    ] {
+        let present = sqlx::query_scalar::<_, bool>(
+            "select count(*) > 0 from information_schema.columns \
+             where table_schema = 'x_archive' and table_name = 'bookmark_incremental_state' \
+               and column_name = $1",
+        )
+        .bind(column)
+        .fetch_one(database.pool())
+        .await
+        .expect("the column catalog is readable");
+        if !present {
+            missing.push(format!("bookmark_incremental_state.{column}"));
+        }
+    }
+    let repair_identity_is_unique: bool = sqlx::query_scalar(
+        "select count(*) > 0 from pg_indexes where schemaname = 'x_archive' \
+         and tablename = 'bookmark_reconciliation_repairs' and indexdef ilike '%unique%' \
+         and indexdef ilike '%snapshot_id%' and indexdef ilike '%bookmark_id%'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the repair index catalog is readable");
+
+    database.pool().close().await;
+    drop_disposable_database(&name, &admin).await;
+    admin.close().await;
+
+    assert!(
+        missing.is_empty(),
+        "incremental scans need durable state and repair evidence; missing {missing:?}"
+    );
+    assert!(
+        repair_identity_is_unique,
+        "a completed snapshot may record each bookmark repair only once"
     );
 }
 

@@ -1,5 +1,11 @@
 //! Complete bookmark snapshots with durable checkpoints and atomic authority.
 
+mod incremental;
+
+pub use incremental::{
+    IncrementalOutcome, IncrementalScanService, SCHEDULED_BOOKMARK_SCAN_COMMAND, ScheduledScan,
+};
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -316,6 +322,15 @@ impl BookmarkSnapshotService {
         let statistics =
             reconcile_bookmarks(&mut transaction, account_id, run, completed_at).await?;
         record_completion(&mut transaction, run, completed_at, statistics).await?;
+        sqlx::query(
+            "update x_archive.bookmark_incremental_state set requires_full_snapshot = false, \
+             last_outcome = 'idle', updated_at = $2 where account_id = $1",
+        )
+        .bind(account_id)
+        .bind(completed_at)
+        .execute(&mut *transaction)
+        .await
+        .map_err(SnapshotError::Query)?;
         replace_authority(&mut transaction, account_id, run.snapshot_id, completed_at).await?;
         transaction.commit().await.map_err(SnapshotError::Query)?;
         Ok(())
@@ -419,7 +434,7 @@ async fn upsert_active_bookmarks(
          from x_archive.snapshot_bookmark_items item where item.snapshot_id = $2 \
          on conflict (account_id, post_id) do update set \
          last_observed_saved_at = excluded.last_observed_saved_at, observed_removed_at = null, \
-         observed_removed_snapshot_id = null",
+         observed_removed_snapshot_id = null, last_incremental_run_id = null",
     )
     .bind(account_id)
     .bind(snapshot_id)
@@ -435,22 +450,35 @@ async fn record_absent_bookmarks(
     snapshot_id: Uuid,
     completed_at: DateTime<Utc>,
 ) -> Result<u64, SnapshotError> {
-    let removed_count = sqlx::query(
+    let removed_bookmarks: Vec<(Uuid, Option<Uuid>)> = sqlx::query_as(
         "update x_archive.bookmarks bookmark set observed_removed_at = $3, \
          observed_removed_snapshot_id = $2 where bookmark.account_id = $1 \
          and bookmark.observed_removed_at is null and not exists ( \
            select 1 from x_archive.snapshot_bookmark_items item \
            where item.snapshot_id = $2 and item.post_id = bookmark.post_id
-         )",
+         ) returning bookmark.id, bookmark.last_incremental_run_id",
     )
     .bind(account_id)
     .bind(snapshot_id)
     .bind(completed_at)
-    .execute(&mut **transaction)
+    .fetch_all(&mut **transaction)
     .await
-    .map_err(SnapshotError::Query)?
-    .rows_affected();
-    Ok(removed_count)
+    .map_err(SnapshotError::Query)?;
+    for (bookmark_id, incremental_run_id) in &removed_bookmarks {
+        if incremental_run_id.is_none() {
+            continue;
+        }
+        sqlx::query(
+            "insert into x_archive.bookmark_reconciliation_repairs (snapshot_id, bookmark_id, reason) \
+             values ($1, $2, 'incremental_drift') on conflict (snapshot_id, bookmark_id) do nothing",
+        )
+        .bind(snapshot_id)
+        .bind(bookmark_id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(SnapshotError::Query)?;
+    }
+    u64::try_from(removed_bookmarks.len()).map_err(|_| SnapshotError::StatisticsOverflow)
 }
 
 async fn record_completion(

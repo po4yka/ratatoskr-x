@@ -8,7 +8,7 @@ Defines the first-version `x_archive` PostgreSQL schema that this service owns: 
 
 ### Requirement: Owned schema inventory
 
-Applying the schema to an empty database SHALL create exactly the service's owned tables inside the `x_archive` schema: accounts, credentials, users, posts, post relations, media, bookmarks, bookmark folders, bookmark folder items, sync runs, snapshots, snapshot bookmark items, bookmark snapshot authority, rate limit state, oauth intents, api budget windows, tombstones, outbox events, and inbox events. No table owned by another bounded context SHALL be created. Account rows SHALL carry a closed connection-state vocabulary (`connected`, `refresh_required`, `reauth_required`, `revoked`, `suspended`, `paused`), and credential rows SHALL carry the hash of the refresh token retired by the most recent rotation. Post rows SHALL carry conversation linkage by provider id, nullable public-metric counts, and a parser-version stamp; users, post relations, and media rows SHALL each carry a parser-version stamp recording which parser produced them. Bookmark rows SHALL retain only truthful observation timestamps and, when inferred absent by a complete snapshot, a reference to that snapshot; snapshot/run rows SHALL retain opaque resume state and non-negative page, item, addition, retention, and removal statistics.
+Applying the schema to an empty database SHALL create exactly the service's owned tables inside the `x_archive` schema: accounts, credentials, users, posts, post relations, media, bookmarks, bookmark folders, bookmark folder items, sync runs, snapshots, snapshot bookmark items, bookmark snapshot authority, bookmark incremental state, bookmark reconciliation repairs, rate limit state, oauth intents, api budget windows, tombstones, outbox events, and inbox events. No table owned by another bounded context SHALL be created. Account rows SHALL carry a closed connection-state vocabulary (`connected`, `refresh_required`, `reauth_required`, `revoked`, `suspended`, `paused`), and credential rows SHALL carry the hash of the refresh token retired by the most recent rotation. Post rows SHALL carry conversation linkage by provider id, nullable public-metric counts, and a parser-version stamp; users, post relations, and media rows SHALL each carry a parser-version stamp recording which parser produced them. Bookmark rows SHALL retain only truthful observation timestamps and, when inferred absent by a complete snapshot, a reference to that snapshot; snapshot/run rows SHALL retain opaque resume state and non-negative page, item, addition, retention, and removal statistics.
 
 #### Scenario: Fresh database receives the full owned inventory
 
@@ -34,6 +34,20 @@ Applying the schema to an empty database SHALL create exactly the service's owne
 
 - **WHEN** the applied bookmark, run, snapshot, staging, and authority tables are inspected
 - **THEN** the schema can retain an opaque checkpoint, snapshot membership keyed to normalized posts, a single current snapshot per account, truthful removal evidence, and non-negative reconciliation statistics
+
+### Requirement: The archive schema keeps account ownership and trustworthy bookmark observations
+
+The owned `x_archive` schema SHALL keep provider identifiers namespaced by provider and account-scoped bookmark observations separate from normalized posts. It SHALL store first and last observation instants without representing either as an authoritative provider save time, retain observed removals rather than deleting records, and include in-place durable state for each account's incremental watermark, complete-snapshot requirement, partial-scan outcome, and idempotent complete-snapshot repair evidence.
+
+#### Scenario: A bookmark observation never exposes the post publication time as saved time
+
+- **WHEN** a normalized post has a publication timestamp and becomes an account bookmark observation
+- **THEN** its bookmark record persists distinct first/last observation fields and has no column or API field that claims the post timestamp was a provider saved time
+
+#### Scenario: A repair record is unique to its complete snapshot and bookmark
+
+- **WHEN** reconciliation attempts to record the same bookmark repair more than once for one complete snapshot
+- **THEN** the schema retains exactly one repair record for that snapshot and bookmark
 
 ### Requirement: In-place idempotent application without migrations
 
