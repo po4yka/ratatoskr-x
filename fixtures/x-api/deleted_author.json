@@ -1,0 +1,17 @@
+{
+  "data": [
+    {
+      "id": "800900100",
+      "text": "This post's author is absent from includes.users.",
+      "created_at": "2026-08-07T16:45:00.000Z",
+      "author_id": "9999",
+      "conversation_id": "800900100",
+      "edit_history_tweet_ids": [
+        "800900100"
+      ]
+    }
+  ],
+  "includes": {
+    "users": []
+  }
+}

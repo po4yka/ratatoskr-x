@@ -1,0 +1,21 @@
+{
+  "data": [
+    {
+      "text": "This post is missing its required provider id.",
+      "created_at": "2026-08-09T07:00:00.000Z",
+      "author_id": "9009",
+      "edit_history_tweet_ids": [
+        ""
+      ]
+    }
+  ],
+  "includes": {
+    "users": [
+      {
+        "id": "9009",
+        "name": "Fixture Missing Id Author",
+        "username": "fixture_missing_id_author"
+      }
+    ]
+  }
+}

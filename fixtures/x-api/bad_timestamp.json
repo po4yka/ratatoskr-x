@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "id": "100300500",
+      "text": "This post carries an unparseable publication timestamp.",
+      "created_at": "09.08.2026 07:00 AM",
+      "author_id": "9010",
+      "edit_history_tweet_ids": [
+        "100300500"
+      ]
+    }
+  ],
+  "includes": {
+    "users": [
+      {
+        "id": "9010",
+        "name": "Fixture Bad Timestamp Author",
+        "username": "fixture_bad_timestamp_author"
+      }
+    ]
+  }
+}

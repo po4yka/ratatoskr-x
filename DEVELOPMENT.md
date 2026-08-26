@@ -6,7 +6,7 @@ The first scaffold is implemented: a Rust workspace with typed configuration, st
 
 ## Toolchain
 
-Rust/Tokio pinned by `rust-toolchain.toml` (1.97.0), axum for the admin listener, SQLx/PostgreSQL without the migrate feature — `schema.sql` is edited in place while development status forbids migrations. Reqwest/Rustls carries the OAuth token adapter behind recorded provider fixtures served by WireMock in tests; AES-256-GCM encrypts credentials under an environment-provided key; NATS JetStream and testcontainers arrive with the changes that need them.
+Rust/Tokio pinned by `rust-toolchain.toml` (1.97.0), axum for the admin listener, SQLx/PostgreSQL without the migrate feature — `schema.sql` is edited in place while development status forbids migrations. Reqwest/Rustls carries the OAuth token adapter behind recorded provider fixtures served by WireMock in tests; AES-256-GCM encrypts credentials under an environment-provided key; pure normalization of official API payloads lives in `crates/x-normalize` with no I/O dependencies; NATS JetStream and testcontainers arrive with the changes that need them.
 
 ## Code size limits
 

@@ -1,0 +1,23 @@
+[package]
+name = "ratatoskr-x-normalize"
+description = "Pure normalization of official X API payloads into x_archive row-shaped records"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[lib]
+name = "x_normalize"
+path = "src/lib.rs"
+
+[dependencies]
+chrono.workspace     = true
+serde.workspace      = true
+serde_json.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,36 @@
+{
+  "data": [
+    {
+      "id": "100200300",
+      "text": "Fixture post about normalization pipelines.",
+      "created_at": "2026-08-01T12:00:00.000Z",
+      "author_id": "9001",
+      "conversation_id": "100200300",
+      "lang": "en",
+      "public_metrics": {
+        "retweet_count": 3,
+        "reply_count": 1,
+        "like_count": 12,
+        "quote_count": 0,
+        "bookmark_count": 4,
+        "impression_count": 500
+      },
+      "edit_history_tweet_ids": [
+        "100200300"
+      ]
+    }
+  ],
+  "includes": {
+    "users": [
+      {
+        "id": "9001",
+        "name": "Fixture Author",
+        "username": "fixture_author",
+        "created_at": "2020-01-01T00:00:00.000Z"
+      }
+    ]
+  },
+  "meta": {
+    "result_count": 1
+  }
+}
