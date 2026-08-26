@@ -10,7 +10,7 @@
 
 use x_persistence::database::Database;
 
-/// The twenty-one tables the owned schema must contain, no more and no fewer.
+/// The twenty-five tables the owned schema must contain, no more and no fewer.
 const OWNED_TABLES: &[&str] = &[
     "accounts",
     "api_budget_windows",
@@ -21,6 +21,9 @@ const OWNED_TABLES: &[&str] = &[
     "bookmark_snapshot_authority",
     "bookmarks",
     "credentials",
+    "folder_capability_limits",
+    "folder_membership_observations",
+    "folder_membership_snapshot_authority",
     "inbox_events",
     "media",
     "oauth_intents",
@@ -29,6 +32,7 @@ const OWNED_TABLES: &[&str] = &[
     "posts",
     "rate_limit_state",
     "snapshot_bookmark_items",
+    "snapshot_folder_membership_items",
     "snapshots",
     "sync_runs",
     "tombstones",

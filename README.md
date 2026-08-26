@@ -101,7 +101,7 @@ The sync model combines frequent partial scans and periodic full snapshots.
 - enumerate every bookmark page successfully;
 - record a snapshot identity and completion boundary;
 - only after complete success, mark previously present but now absent bookmarks as removed;
-- reconcile native folder membership independently;
+- reconcile native folder membership through its own complete snapshot authority;
 - preserve warnings if one optional enrichment fails.
 
 Invariant:
@@ -123,7 +123,11 @@ A post can simultaneously:
 - have a user note;
 - be linked to an extracted external article.
 
-Folder reconciliation must never overwrite local organization.
+Folder reconciliation must never overwrite local organization. A folder entity is observed only from a supported provider operation; bookmark presence, a local tag, or a local collection never creates one. Each native folder's membership has a separate staged snapshot and authority pointer: a complete traversal atomically replaces that folder's current membership, while a failed, truncated, cancelled, or rate-limited traversal leaves its previous authority intact. Added and absent memberships are retained as observations linked to the completing snapshot.
+
+If the provider does not expose folder listing or membership reading for the connected account, Ratatoskr records that operation's capability limit and makes no empty-folder, membership-removal, or successful-snapshot claim. This is different from an observed empty complete result.
+
+Bookmark saved state and native folder membership are therefore consistent in their authority discipline but independent in meaning: a normalized post can be bookmarked, belong to one or more native folders, and belong to local collections or tags in any combination.
 
 ## Post normalization
 

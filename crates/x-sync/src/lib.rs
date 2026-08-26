@@ -1,7 +1,12 @@
 //! Complete bookmark snapshots with durable checkpoints and atomic authority.
 
+mod folders;
 mod incremental;
 
+pub use folders::{
+    FolderCapability, FolderMembershipPage, FolderMembershipPageSource,
+    FolderMembershipSourceError, FolderSnapshotOutcome, FolderSnapshotService, NativeFolder,
+};
 pub use incremental::{
     IncrementalOutcome, IncrementalScanService, SCHEDULED_BOOKMARK_SCAN_COMMAND, ScheduledScan,
 };

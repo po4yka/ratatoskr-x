@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS x_archive.bookmark_folder_items (
     post_id   uuid NOT NULL REFERENCES x_archive.posts (id),
     first_observed_in_folder_at timestamptz NOT NULL DEFAULT now(),
     observed_removed_from_folder_at timestamptz,
+    observed_removed_snapshot_id uuid,
     PRIMARY KEY (folder_id, post_id)
 );
 
@@ -164,6 +165,7 @@ CREATE TABLE IF NOT EXISTS x_archive.sync_runs (
 CREATE TABLE IF NOT EXISTS x_archive.snapshots (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     sync_run_id  uuid NOT NULL REFERENCES x_archive.sync_runs (id),
+    folder_id    uuid REFERENCES x_archive.bookmark_folders (id),
     complete     boolean NOT NULL DEFAULT false,
     completed_at timestamptz,
     page_count   integer NOT NULL DEFAULT 0
@@ -199,6 +201,55 @@ CREATE TABLE IF NOT EXISTS x_archive.bookmark_snapshot_authority (
     snapshot_id uuid NOT NULL REFERENCES x_archive.snapshots (id),
     updated_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- A folder membership snapshot stages candidate posts for exactly one native
+-- folder. The staged rows carry no current-state authority before completion.
+CREATE TABLE IF NOT EXISTS x_archive.snapshot_folder_membership_items (
+    snapshot_id uuid NOT NULL REFERENCES x_archive.snapshots (id),
+    post_id     uuid NOT NULL REFERENCES x_archive.posts (id),
+    observed_at timestamptz NOT NULL,
+    PRIMARY KEY (snapshot_id, post_id)
+);
+
+-- Exactly one completed membership snapshot is current for each native folder.
+CREATE TABLE IF NOT EXISTS x_archive.folder_membership_snapshot_authority (
+    folder_id    uuid PRIMARY KEY REFERENCES x_archive.bookmark_folders (id) ON DELETE CASCADE,
+    snapshot_id  uuid NOT NULL REFERENCES x_archive.snapshots (id),
+    updated_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- Membership changes are immutable observations, not destructive row diffs.
+CREATE TABLE IF NOT EXISTS x_archive.folder_membership_observations (
+    snapshot_id uuid NOT NULL REFERENCES x_archive.snapshots (id),
+    folder_id   uuid NOT NULL REFERENCES x_archive.bookmark_folders (id) ON DELETE CASCADE,
+    post_id     uuid NOT NULL REFERENCES x_archive.posts (id),
+    kind        text NOT NULL CHECK (kind IN ('added', 'removed')),
+    observed_at timestamptz NOT NULL,
+    PRIMARY KEY (snapshot_id, folder_id, post_id, kind)
+);
+
+-- A provider capability limit is evidence that the service could not observe
+-- an operation. It is not an empty folder or membership snapshot.
+CREATE TABLE IF NOT EXISTS x_archive.folder_capability_limits (
+    account_id  uuid NOT NULL REFERENCES x_archive.accounts (id),
+    capability  text NOT NULL CHECK (capability IN ('listing', 'membership')),
+    last_run_id uuid NOT NULL REFERENCES x_archive.sync_runs (id),
+    recorded_at timestamptz NOT NULL,
+    PRIMARY KEY (account_id, capability)
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'bookmark_folder_items_observed_removed_snapshot_id_fkey'
+          AND conrelid = 'x_archive.bookmark_folder_items'::regclass
+    ) THEN
+        ALTER TABLE x_archive.bookmark_folder_items
+            ADD CONSTRAINT bookmark_folder_items_observed_removed_snapshot_id_fkey
+            FOREIGN KEY (observed_removed_snapshot_id) REFERENCES x_archive.snapshots (id);
+    END IF;
+END $$;
 
 -- Head scans are observation-only. Their watermark is a provider post identity,
 -- not an invented bookmark timestamp, and a detected gap requires the next run

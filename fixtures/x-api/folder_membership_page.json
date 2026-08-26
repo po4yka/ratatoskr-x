@@ -1,0 +1,25 @@
+{
+  "data": [
+    {
+      "id": "new-post",
+      "text": "New folder member",
+      "author_id": "folder-author",
+      "created_at": "2026-08-20T12:00:00Z"
+    },
+    {
+      "id": "retained-post",
+      "text": "Retained folder member",
+      "author_id": "folder-author",
+      "created_at": "2026-08-19T12:00:00Z"
+    }
+  ],
+  "includes": {
+    "users": [
+      {
+        "id": "folder-author",
+        "name": "Folder Author",
+        "username": "folder_author"
+      }
+    ]
+  }
+}
