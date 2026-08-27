@@ -229,6 +229,13 @@ impl IncrementalScanService {
         let posts = persist_posts(&mut transaction, normalized.posts(), &users).await?;
         persist_relations(&mut transaction, normalized.relations(), &posts).await?;
         persist_media(&mut transaction, normalized.media(), &posts).await?;
+        crate::social_sources::publish_bookmark_sources(
+            &mut transaction,
+            account_id,
+            posts.values().copied(),
+            observation_time,
+        )
+        .await?;
         upsert_observed_bookmarks(
             &mut transaction,
             account_id,

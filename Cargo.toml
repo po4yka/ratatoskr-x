@@ -30,6 +30,14 @@ ratatoskr-x-telemetry = { version = "0.1.0", path = "crates/x-telemetry" }
 ratatoskr-x-normalize = { version = "0.1.0", path = "crates/x-normalize" }
 ratatoskr-x-sync = { version = "0.1.0", path = "crates/x-sync" }
 
+# The shared social and envelope types must resolve from one immutable source so their Rust
+# nominal identities cannot diverge across the X event boundary.
+ratatoskr-social-contracts = { git = "https://github.com/po4yka/ratatoskr-contracts.git", rev = "b7aa013c78ef73eb2a5798935e74167c4cf98314" }
+ratatoskr-event-envelope = { git = "https://github.com/po4yka/ratatoskr-contracts.git", rev = "b7aa013c78ef73eb2a5798935e74167c4cf98314" }
+ratatoskr-identifiers = { git = "https://github.com/po4yka/ratatoskr-contracts.git", rev = "b7aa013c78ef73eb2a5798935e74167c4cf98314" }
+ratatoskr-operation-contracts = { git = "https://github.com/po4yka/ratatoskr-contracts.git", rev = "b7aa013c78ef73eb2a5798935e74167c4cf98314" }
+ratatoskr-document-contracts = { git = "https://github.com/po4yka/ratatoskr-contracts.git", rev = "b7aa013c78ef73eb2a5798935e74167c4cf98314" }
+
 aes-gcm = { version = "=0.11.1", default-features = false, features = ["aes", "alloc"] }
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 base64 = "=0.23.1"

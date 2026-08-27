@@ -107,6 +107,8 @@ pub struct NormalizedPost {
     pub impression_count: Option<i64>,
     /// Attachment keys owned by this post, sorted without duplicates.
     pub media_keys: Vec<String>,
+    /// Provider-resolved URL entities, sorted and deduplicated without fetching them.
+    pub expanded_urls: Vec<String>,
     /// Preserved unmodeled payload members plus reserved-key material
     /// (`ratatoskr.x/unresolved_references`) for unmapped reference types.
     pub extension: Extension,

@@ -7,6 +7,9 @@ CREATE SCHEMA IF NOT EXISTS x_archive;
 
 CREATE TABLE IF NOT EXISTS x_archive.accounts (
     id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- Ratatoskr owner identity is distinct from the provider account id. It is
+    -- required when emitting shared social contracts and scoping article work.
+    internal_user_id uuid NOT NULL DEFAULT gen_random_uuid(),
     provider_user_id text NOT NULL UNIQUE,
     state            text NOT NULL DEFAULT 'connected'
         CHECK (state IN ('connected', 'refresh_required', 'reauth_required',
@@ -69,6 +72,10 @@ CREATE TABLE IF NOT EXISTS x_archive.posts (
     author_user_id uuid NOT NULL REFERENCES x_archive.users (id),
     text           text NOT NULL DEFAULT '',
     long_text      text,
+    -- Provider-expanded URL entities are retained as normalized metadata so
+    -- explicit and bookmark capture paths observe the same article links.
+    expanded_urls  jsonb NOT NULL DEFAULT '[]'::jsonb
+        CHECK (jsonb_typeof(expanded_urls) = 'array'),
     language       text,
     published_at   timestamptz,
     edited_at      timestamptz,
@@ -304,6 +311,68 @@ CREATE TABLE IF NOT EXISTS x_archive.tombstones (
         CHECK (reason IN ('deleted', 'protected', 'author_suspended', 'unavailable', 'unknown')),
     evidence_snapshot_id uuid REFERENCES x_archive.snapshots (id),
     recorded_at          timestamptz NOT NULL DEFAULT now()
+);
+
+-- A social source is an account-library record, rather than a global X post
+-- attribute: one provider post may be captured by several Ratatoskr owners.
+CREATE TABLE IF NOT EXISTS x_archive.social_sources (
+    id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id            uuid NOT NULL REFERENCES x_archive.accounts (id),
+    post_id               uuid NOT NULL REFERENCES x_archive.posts (id),
+    social_source_id      uuid NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+    current_content_digest jsonb NOT NULL,
+    acquisition           text NOT NULL CHECK (acquisition IN ('official_api', 'browser_extension')),
+    saved_authority       text NOT NULL CHECK (saved_authority IN ('authoritative_platform_state',
+                                                                     'explicit_user_capture')),
+    captured_at           timestamptz NOT NULL,
+    created_at            timestamptz NOT NULL DEFAULT now(),
+    updated_at            timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (account_id, post_id)
+);
+
+-- Retained source revisions are the durable basis for idempotent captured and
+-- updated event selection. The event itself remains in the transactional outbox.
+CREATE TABLE IF NOT EXISTS x_archive.social_source_revisions (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    social_source_id  uuid NOT NULL REFERENCES x_archive.social_sources (social_source_id)
+        ON DELETE CASCADE,
+    content_digest    jsonb NOT NULL,
+    captured_at       timestamptz NOT NULL,
+    acquisition       text NOT NULL CHECK (acquisition IN ('official_api', 'browser_extension')),
+    saved_authority   text NOT NULL CHECK (saved_authority IN ('authoritative_platform_state',
+                                                                'explicit_user_capture')),
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (social_source_id, content_digest)
+);
+
+-- X owns the request and result linkage for an external article, while the
+-- extractor owns fetching and producing the document itself. A capture is
+-- deduplicated per owner and canonical external URL, never globally.
+CREATE TABLE IF NOT EXISTS x_archive.article_captures (
+    id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id         uuid NOT NULL REFERENCES x_archive.accounts (id),
+    normalized_url     text NOT NULL,
+    original_url       text NOT NULL,
+    correlation_id     text NOT NULL UNIQUE,
+    state              text NOT NULL DEFAULT 'requested'
+        CHECK (state IN ('requested', 'completed', 'failed')),
+    document_id        text,
+    document_ir_blob   jsonb,
+    completed_at       timestamptz,
+    created_at         timestamptz NOT NULL DEFAULT now(),
+    updated_at         timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (account_id, normalized_url)
+);
+
+-- Each source post retains its own evidence link to a deduplicated article
+-- capture, so a single extractor outcome can be projected back to every post.
+CREATE TABLE IF NOT EXISTS x_archive.post_article_links (
+    social_source_id  uuid NOT NULL REFERENCES x_archive.social_sources (social_source_id)
+        ON DELETE CASCADE,
+    article_capture_id uuid NOT NULL REFERENCES x_archive.article_captures (id)
+        ON DELETE CASCADE,
+    linked_at          timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (social_source_id, article_capture_id)
 );
 
 CREATE TABLE IF NOT EXISTS x_archive.outbox_events (

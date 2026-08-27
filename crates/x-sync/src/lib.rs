@@ -1,7 +1,15 @@
 //! Complete bookmark snapshots with durable checkpoints and atomic authority.
 
+mod articles;
+mod explicit_capture;
 mod folders;
 mod incremental;
+mod social_sources;
+
+pub use articles::{
+    ArticleCaptureError, ArticleCaptureService, SelectedArticleUrl, select_external_expanded_urls,
+};
+pub use explicit_capture::{ExplicitCaptureError, ExplicitCaptureService};
 
 pub use folders::{
     FolderCapability, FolderMembershipPage, FolderMembershipPageSource,
@@ -90,6 +98,9 @@ pub enum SnapshotError {
     /// The official provider payload could not be normalized.
     #[error(transparent)]
     Normalize(#[from] x_normalize::error::NormalizeError),
+    /// A normalized record could not be represented by the pinned shared contract.
+    #[error("a normalized source does not satisfy the shared social contract")]
+    Contract(#[source] serde_json::Error),
     /// A database query failed.
     #[error("a bookmark snapshot database query failed")]
     Query(#[source] sqlx::Error),
@@ -221,6 +232,7 @@ impl BookmarkSnapshotService {
 
         Ok(Run {
             id: run_id,
+            account_id,
             snapshot_id,
             checkpoint: None,
         })
@@ -252,6 +264,7 @@ impl BookmarkSnapshotService {
 
         Ok(Run {
             id: run_id,
+            account_id,
             snapshot_id,
             checkpoint,
         })
@@ -276,6 +289,13 @@ impl BookmarkSnapshotService {
         let posts = persist_posts(&mut transaction, normalized.posts(), &users).await?;
         persist_relations(&mut transaction, normalized.relations(), &posts).await?;
         persist_media(&mut transaction, normalized.media(), &posts).await?;
+        social_sources::publish_bookmark_sources(
+            &mut transaction,
+            run.account_id,
+            posts.values().copied(),
+            observed_at,
+        )
+        .await?;
         for post_id in posts.values() {
             sqlx::query(
                 "insert into x_archive.snapshot_bookmark_items (snapshot_id, post_id, observed_at) \
@@ -345,6 +365,7 @@ impl BookmarkSnapshotService {
 #[derive(Debug)]
 struct Run {
     id: Uuid,
+    account_id: Uuid,
     snapshot_id: Uuid,
     checkpoint: Option<String>,
 }
@@ -577,8 +598,8 @@ async fn persist_posts(
         let id: Uuid = sqlx::query_scalar(
             "insert into x_archive.posts (provider_id, author_user_id, text, long_text, language, \
              published_at, edited_at, conversation_provider_id, like_count, retweet_count, \
-             reply_count, quote_count, bookmark_count, impression_count, parser_version, availability) \
-             values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) \
+             reply_count, quote_count, bookmark_count, impression_count, parser_version, availability, expanded_urls) \
+             values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb) \
              on conflict (provider_id) do update set author_user_id = excluded.author_user_id, \
              text = excluded.text, long_text = excluded.long_text, language = excluded.language, \
              published_at = excluded.published_at, edited_at = excluded.edited_at, \
@@ -586,7 +607,8 @@ async fn persist_posts(
              retweet_count = excluded.retweet_count, reply_count = excluded.reply_count, \
              quote_count = excluded.quote_count, bookmark_count = excluded.bookmark_count, \
              impression_count = excluded.impression_count, parser_version = excluded.parser_version, \
-             availability = excluded.availability, updated_at = now() returning id",
+             availability = excluded.availability, expanded_urls = excluded.expanded_urls, \
+             updated_at = now() returning id",
         )
         .bind(&post.provider_id)
         .bind(author_id)
@@ -604,6 +626,7 @@ async fn persist_posts(
         .bind(post.impression_count)
         .bind(post.parser_version)
         .bind(availability_name(post.availability))
+        .bind(serde_json::to_string(&post.expanded_urls).map_err(SnapshotError::Contract)?)
         .fetch_one(&mut **transaction)
         .await
         .map_err(SnapshotError::Query)?;

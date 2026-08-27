@@ -152,6 +152,8 @@ pub struct PostObject {
     pub referenced_tweets: Option<Vec<ReferencedTweet>>,
     /// Long-form note body for posts longer than the canonical text.
     pub note_tweet: Option<NoteTweet>,
+    /// Provider-resolved external URL entities attached to the post text.
+    pub entities: Option<PostEntities>,
     /// Attached media keys and polls.
     pub attachments: Option<Attachments>,
     /// Edit metadata as supplied by the provider.
@@ -205,6 +207,31 @@ pub struct NoteTweet {
     /// Full text of the long-form body.
     pub text: Option<String>,
     /// Unmodeled members, preserved verbatim.
+    #[serde(flatten)]
+    pub extension: Extension,
+}
+
+/// Provider entities that annotate one post's text.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PostEntities {
+    /// Expanded URL entities supplied by the official API.
+    #[serde(default)]
+    pub urls: Vec<PostUrlEntity>,
+    /// Unmodeled entity groups preserved verbatim.
+    #[serde(flatten)]
+    pub extension: Extension,
+}
+
+/// One provider URL entity.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PostUrlEntity {
+    /// Provider's shortened display address.
+    pub url: Option<String>,
+    /// Provider-expanded destination when available.
+    pub expanded_url: Option<String>,
+    /// Provider-unwound final destination when available.
+    pub unwound_url: Option<String>,
+    /// Unmodeled URL-entity members preserved verbatim.
     #[serde(flatten)]
     pub extension: Extension,
 }

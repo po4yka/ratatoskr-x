@@ -305,6 +305,16 @@ fn normalize_post(
     media_keys.sort();
     media_keys.dedup();
 
+    let mut expanded_urls: Vec<String> = post
+        .entities
+        .as_ref()
+        .into_iter()
+        .flat_map(|entities| &entities.urls)
+        .filter_map(|url| url.unwound_url.clone().or_else(|| url.expanded_url.clone()))
+        .collect();
+    expanded_urls.sort();
+    expanded_urls.dedup();
+
     let mut extension = post.extension.clone();
     if !unresolved_references.is_empty() {
         extension.insert(
@@ -333,6 +343,7 @@ fn normalize_post(
         bookmark_count: metrics.and_then(|m| m.bookmark_count),
         impression_count: metrics.and_then(|m| m.impression_count),
         media_keys,
+        expanded_urls,
         extension,
     })
 }

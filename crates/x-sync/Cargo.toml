@@ -13,16 +13,22 @@ path = "src/lib.rs"
 
 [dependencies]
 chrono.workspace                    = true
+ratatoskr-document-contracts.workspace = true
+ratatoskr-event-envelope.workspace  = true
+ratatoskr-identifiers.workspace     = true
+ratatoskr-operation-contracts.workspace = true
+ratatoskr-social-contracts.workspace = true
 ratatoskr-x-budget.workspace        = true
 ratatoskr-x-normalize.workspace     = true
 ratatoskr-x-persistence.workspace   = true
+serde_json.workspace                = true
+sha2.workspace                      = true
 sqlx.workspace                      = true
 thiserror.workspace                 = true
 uuid.workspace                      = true
 
 [dev-dependencies]
 ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
-serde_json.workspace = true
 tokio.workspace = true
 
 [lints]
