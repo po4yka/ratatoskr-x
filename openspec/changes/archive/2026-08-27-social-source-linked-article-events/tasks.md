@@ -35,4 +35,4 @@
 
 - [x] 5.1 Run targeted crate tests and contract-fixture compatibility checks under `build-gate`, then run `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`.
 - [x] 5.2 Run the repository's full documented gate, inspect the final diff and staged diff, and update task checkboxes only for observed completion.
-- [ ] 5.3 Commit the scoped change, rebase/integrate it into current `main`, push `main`, confirm remote ancestry, then remove only this task worktree and branch.
+- [x] 5.3 Commit the scoped change, rebase/integrate it into current `main`, push `main`, confirm remote ancestry, then remove only this task worktree and branch.
