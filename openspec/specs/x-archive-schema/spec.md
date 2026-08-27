@@ -13,9 +13,9 @@ Applying the schema to an empty database SHALL create exactly the service's owne
 folders, bookmark folder items, sync runs, snapshots, snapshot bookmark items, bookmark snapshot
 authority, bookmark incremental state, bookmark reconciliation repairs, rate limit state, oauth
 intents, api budget windows, tombstones, social sources, social source revisions, Knowledge analysis
-links, compliance revalidation ledger, article captures, post article links, outbox events, and
-inbox events. No table owned by another bounded context SHALL be created. Account rows SHALL carry a
-closed connection-state vocabulary (`connected`, `refresh_required`, `reauth_required`, `revoked`,
+links, compliance revalidation ledger, article captures, post article links, explicit captures,
+outbox events, and inbox events. No table owned by another bounded context SHALL be created.
+Account rows SHALL carry a closed connection-state vocabulary (`connected`, `refresh_required`, `reauth_required`, `revoked`,
 `suspended`, `paused`) and the internal owner identity required by account-scoped records;
 credential rows SHALL carry the hash of the refresh token retired by the most recent rotation. Post
 rows SHALL carry conversation linkage by provider id, nullable public-metric counts, a parser-version
@@ -27,7 +27,9 @@ key. Compliance ledger entries and tombstones SHALL preserve account, source, pr
 request evidence without retaining credentials or provider content. Article captures SHALL preserve
 the normalized URL, operation and correlation identifiers, terminal state, and optional Document
 identity and Document IR BlobRef. Post article links SHALL permit several posts to reference one
-account article capture.
+account article capture. Explicit captures SHALL retain the accepted command and operation identity,
+original permalink, captured instant, and explicit browser provenance without claiming a native X
+bookmark.
 
 #### Scenario: Fresh database receives the full owned inventory
 

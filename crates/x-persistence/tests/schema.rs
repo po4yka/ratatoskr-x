@@ -10,7 +10,7 @@
 
 use x_persistence::database::Database;
 
-/// The thirty-one tables the owned schema must contain, no more and no fewer.
+/// The thirty-two tables the owned schema must contain, no more and no fewer.
 const OWNED_TABLES: &[&str] = &[
     "accounts",
     "api_budget_windows",
@@ -23,6 +23,7 @@ const OWNED_TABLES: &[&str] = &[
     "bookmarks",
     "compliance_revalidation_ledger",
     "credentials",
+    "explicit_captures",
     "folder_capability_limits",
     "folder_membership_observations",
     "folder_membership_snapshot_authority",

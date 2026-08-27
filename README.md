@@ -2,7 +2,7 @@
 
 `ratatoskr-x` is the X account and bookmark archive bounded context for Ratatoskr. It authenticates a user through the official X OAuth flow, synchronizes bookmarks and bookmark folders, preserves normalized post content and media metadata, and publishes authoritative social-source events for indexing and analysis.
 
-> **Status:** the service scaffold, official OAuth connection, post normalization, complete and frequent bookmark scans, native-folder authority, normalized social-source and linked-article outbox facts, Knowledge completion linkage, and the due-driven compliance/takedown application service are implemented. Knowledge owns analysis, embeddings, and search documents; X stores only exact `(social_source_id, content_digest)` completion linkage. The repository still has no broker runtime or periodic scheduler, so outbox/inbox delivery and timed compliance invocation are not live deployment claims. An official provider adapter for compliance classification, write-back, and legacy import remain unimplemented.
+> **Status:** the service scaffold, official OAuth connection, post normalization, complete and frequent bookmark scans, native-folder authority, explicit browser-capture command consumer, normalized social-source and linked-article outbox facts, Knowledge completion linkage, and the due-driven compliance/takedown application service are implemented. Knowledge owns analysis, embeddings, and search documents; X stores only exact `(social_source_id, content_digest)` completion linkage. Knowledge completion/removal transport and timed compliance invocation are not wired into the runtime, so they are not live deployment claims. An official provider adapter for compliance classification, write-back, and legacy import remain unimplemented.
 
 > [!IMPORTANT]
 > **Ratatoskr is in development.** No database holds data that has to survive a schema change.
@@ -71,6 +71,7 @@ social_source_revisions
 knowledge_analysis_links
 compliance_revalidation_ledger
 tombstones
+explicit_captures
 outbox_events
 inbox_events
 ```
@@ -359,5 +360,6 @@ Planned: `ratatoskr-workspace` will pin this service with compatible social cont
 Plan items 1–8 in `docs/IMPLEMENTATION_PLAN.md` now have durable application behavior and tests.
 For item 8, this means revision-deduplicated SocialSource requests, exact Knowledge completion
 linkage, the revalidation ledger, and replay-safe takedown outbox state. It does not mean live
-periodic execution or broker delivery: those require the future runtime scheduler, transport, and
-official-provider compliance adapter. Write-back and legacy migration remain planned.
+periodic execution or Knowledge/compliance broker delivery: those require the future runtime
+scheduler, transport, and official-provider compliance adapter. Write-back and legacy migration
+remain planned.

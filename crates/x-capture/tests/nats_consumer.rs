@@ -34,24 +34,22 @@ async fn consumes_the_provider_subject_into_the_durable_x_inbox() {
     let database = TestDatabase::create().await.expect("test database");
     let client = async_nats::connect(nats_url()).await.expect("test NATS");
     let context = jetstream::new(client);
-    let stream_name = format!("x_browser_capture_{}", uuid::Uuid::now_v7().simple());
-    context
-        .create_stream(jetstream::stream::Config {
-            name: stream_name.clone(),
-            subjects: vec![COMMAND_SUBJECT.to_owned()],
+    let stream_name = "ratatoskr_commands";
+    let durable_name = format!("x_browser_capture_test_{}", uuid::Uuid::now_v7().simple());
+    let stream = context
+        .get_or_create_stream(jetstream::stream::Config {
+            name: stream_name.to_owned(),
+            subjects: vec!["cmd.>".to_owned()],
             ..jetstream::stream::Config::default()
         })
         .await
         .expect("command stream");
-    let stream = context
-        .get_stream(&stream_name)
-        .await
-        .expect("command stream");
     stream
         .create_consumer(jetstream::consumer::pull::Config {
-            durable_name: Some("x_browser_capture_test".to_owned()),
+            durable_name: Some(durable_name.clone()),
             filter_subject: COMMAND_SUBJECT.to_owned(),
             ack_policy: jetstream::consumer::AckPolicy::Explicit,
+            deliver_policy: jetstream::consumer::DeliverPolicy::New,
             ..jetstream::consumer::pull::Config::default()
         })
         .await
@@ -59,13 +57,14 @@ async fn consumes_the_provider_subject_into_the_durable_x_inbox() {
 
     let consumer_database = database.database.clone();
     let consumer_context = context.clone();
-    let consumer_stream = stream_name.clone();
+    let consumer_stream = stream_name.to_owned();
+    let consumer_durable = durable_name.clone();
     let consumer = tokio::spawn(async move {
         consume_browser_commands(
             &consumer_context,
             &consumer_database,
             &consumer_stream,
-            "x_browser_capture_test",
+            &consumer_durable,
             std::future::pending(),
         )
         .await
@@ -97,10 +96,10 @@ async fn consumes_the_provider_subject_into_the_durable_x_inbox() {
     consumer.abort();
     let _ = consumer.await;
     database.cleanup().await.expect("test database cleanup");
-    context
-        .delete_stream(&stream_name)
+    stream
+        .delete_consumer(&durable_name)
         .await
-        .expect("test command stream cleanup");
+        .expect("test durable cleanup");
 }
 
 #[expect(
