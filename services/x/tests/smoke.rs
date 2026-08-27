@@ -12,6 +12,7 @@ use std::net::TcpStream;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use async_nats::jetstream;
 use x_persistence::test_support::TestDatabase;
 
 const HOST: &str = "127.0.0.1";
@@ -51,6 +52,10 @@ fn http_get(port: u16, path: &str) -> String {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the smoke binary chooses its isolated JetStream endpoint"
+)]
 async fn service_serves_health_endpoints_until_sigterm() {
     let database = TestDatabase::create().await.expect("a disposable database");
     let name = database.name().to_owned();
@@ -59,10 +64,42 @@ async fn service_serves_health_endpoints_until_sigterm() {
         .map(|(base, _)| base.to_owned())
         .expect("the url has a database path");
     let port = free_port();
+    let nats_url =
+        std::env::var("X_TEST_NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:14224".to_owned());
+    let nats = async_nats::connect(&nats_url)
+        .await
+        .expect("the test broker connects");
+    let jetstream = jetstream::new(nats);
+    let stream = jetstream
+        .get_or_create_stream(jetstream::stream::Config {
+            name: "ratatoskr_commands".to_owned(),
+            subjects: vec!["cmd.>".to_owned()],
+            ..jetstream::stream::Config::default()
+        })
+        .await
+        .expect("the command stream exists");
+    stream
+        .get_or_create_consumer(
+            "ratatoskr_x_browser_capture",
+            jetstream::consumer::pull::Config {
+                durable_name: Some("ratatoskr_x_browser_capture".to_owned()),
+                filter_subject: "cmd.x.capture.requested.v1".to_owned(),
+                ack_policy: jetstream::consumer::AckPolicy::Explicit,
+                ..jetstream::consumer::pull::Config::default()
+            },
+        )
+        .await
+        .expect("the X command durable exists");
+    let seed_path =
+        std::env::temp_dir().join(format!("ratatoskr-x-smoke-{}.nkey", uuid::Uuid::now_v7()));
+    let seed = nkeys::KeyPair::new_user().seed().expect("a test NKey seed");
+    std::fs::write(&seed_path, seed).expect("the test NKey seed is written");
     let child = Command::new(env!("CARGO_BIN_EXE_ratatoskr-x"))
         .env("RATATOSKR__ADMIN__LISTEN_ADDR", format!("{HOST}:{port}"))
         .env("RATATOSKR__DATABASE__URL", format!("{base}/{name}"))
         .env("RATATOSKR__TELEMETRY__LOG_FORMAT", "json")
+        .env("RATATOSKR__BUS__URL", &nats_url)
+        .env("RATATOSKR__BUS__NKEY_SEED_PATH", &seed_path)
         .env("RUST_LOG", "warn")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -113,4 +150,5 @@ async fn service_serves_health_endpoints_until_sigterm() {
         .cleanup()
         .await
         .expect("cleanup drops the database");
+    std::fs::remove_file(seed_path).expect("cleanup removes the test NKey seed");
 }

@@ -1,0 +1,32 @@
+[package]
+name = "ratatoskr-x-capture"
+description = "Explicit browser capture command handling for Ratatoskr X"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "x_capture"
+path = "src/lib.rs"
+
+[dependencies]
+async-nats.workspace = true
+chrono.workspace = true
+futures-util.workspace = true
+ratatoskr-event-envelope.workspace = true
+ratatoskr-social-contracts.workspace = true
+ratatoskr-x-persistence.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true
