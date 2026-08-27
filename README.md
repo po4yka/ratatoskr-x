@@ -258,6 +258,22 @@ social.source.unavailable.v1
 
 Events are idempotent under at-least-once delivery. Duplicate page or snapshot processing converges on the same post and bookmark records.
 
+### Explicit browser-capture command
+
+Platform routes an explicit X permalink through the provider-only JetStream subject
+`cmd.x.capture.requested.v1`. The X service accepts only the canonical
+`SocialCaptureRequested` command with `provider = x`, `acquisition = browser_extension`, and
+`saved_authority = explicit_user_capture`; it stores the original permalink and action timestamp
+in its durable inbox before acknowledging delivery. This is local user intent, never an X native
+bookmark or Saved claim.
+
+Platform pre-provisions the fixed `ratatoskr_x_browser_capture` pull durable. X connects with its
+own NKey seed path (`RATATOSKR__BUS__NKEY_SEED_PATH`) and requires a credential-free
+`RATATOSKR__BUS__URL`; its identity may read consumer information, pull only that durable, and
+acknowledge only its deliveries. It has no `$JS.API.>` permission and cannot create a consumer with
+another provider's filter. A missing or mismatched durable prevents readiness rather than silently
+dropping browser captures.
+
 ## Legacy migration
 
 The legacy Field Theory system reads a SQLite database and Markdown library without authenticating to X. Migration treats those records as historical observations:

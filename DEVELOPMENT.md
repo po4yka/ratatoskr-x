@@ -36,6 +36,14 @@ cargo test --workspace --locked
 cargo build --workspace --locked --release
 ```
 
+### Browser-capture broker fixture
+
+The X service requires the Platform-preprovisioned `ratatoskr_x_browser_capture` durable on
+`ratatoskr_commands`, filtered to `cmd.x.capture.requested.v1`. In deployment configure
+`RATATOSKR__BUS__URL` and the absolute `RATATOSKR__BUS__NKEY_SEED_PATH`; do not put an NKey seed
+in an environment value or a URL. The service only opens and validates this durable, so a local
+fixture must create the command stream and durable before starting the service.
+
 The command list above and the `gate` job's `run:` steps are one list by rule; a step in `.github/workflows/ci.yml` diffs them and fails on drift, treating this document as the wrong side.
 
 ### OpenSpec checks, unchanged

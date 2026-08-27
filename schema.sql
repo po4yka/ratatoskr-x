@@ -444,3 +444,17 @@ CREATE TABLE IF NOT EXISTS x_archive.inbox_events (
     payload     jsonb NOT NULL,
     consumed_at timestamptz
 );
+
+-- An explicit browser capture is local user intent, not a native X bookmark.
+-- `command_id` is retained separately from the inbox so the domain record explains
+-- which at-least-once delivery created it without implying provider Saved authority.
+CREATE TABLE IF NOT EXISTS x_archive.explicit_captures (
+    capture_id         uuid PRIMARY KEY,
+    command_id         text NOT NULL UNIQUE,
+    operation_id       text NOT NULL,
+    original_permalink text NOT NULL,
+    captured_at        timestamptz NOT NULL,
+    acquisition        text NOT NULL CHECK (acquisition = 'browser_extension'),
+    saved_authority    text NOT NULL CHECK (saved_authority = 'explicit_user_capture'),
+    created_at         timestamptz NOT NULL DEFAULT now()
+);

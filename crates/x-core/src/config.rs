@@ -28,6 +28,8 @@ pub struct XConfig {
     pub oauth: OauthConfig,
     /// Provider API request budget settings.
     pub budgets: BudgetsConfig,
+    /// `JetStream` command-consumer configuration.
+    pub bus: BusConfig,
 }
 
 /// Credential-protection settings.
@@ -99,6 +101,20 @@ pub struct BudgetsConfig {
     pub request_cap_per_window: u32,
     /// Length of one fixed budget window, in seconds.
     pub window_seconds: u64,
+}
+
+/// The private broker connection used only for X-owned commands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BusConfig {
+    /// Private NATS or NATS-over-TLS endpoint; credentials never appear in this URL.
+    pub url: String,
+    /// Absolute path to the private `NKey` seed file used for broker authentication.
+    pub nkey_seed_path: String,
+    /// Platform-owned `JetStream` stream containing command subjects.
+    pub stream_name: String,
+    /// Stable durable name for the X browser-capture pull consumer.
+    pub consumer_name: String,
 }
 
 /// Admin listener settings.
@@ -174,6 +190,12 @@ impl Default for XConfig {
             budgets: BudgetsConfig {
                 request_cap_per_window: 1000,
                 window_seconds: 900,
+            },
+            bus: BusConfig {
+                url: "nats://127.0.0.1:4222".to_owned(),
+                nkey_seed_path: "/run/secrets/ratatoskr-x-nats.nkey".to_owned(),
+                stream_name: "ratatoskr_commands".to_owned(),
+                consumer_name: "ratatoskr_x_browser_capture".to_owned(),
             },
         }
     }
@@ -273,6 +295,18 @@ fn validate(config: &XConfig) -> Violations {
     }
     if config.budgets.window_seconds == 0 {
         violations.push("budgets.window_seconds must be at least 1");
+    }
+    if !(config.bus.url.starts_with("nats://") || config.bus.url.starts_with("tls://")) {
+        violations.push("bus.url must start with nats:// or tls://");
+    }
+    if !config.bus.nkey_seed_path.starts_with('/') {
+        violations.push("bus.nkey_seed_path must be an absolute path");
+    }
+    if config.bus.stream_name.trim().is_empty() {
+        violations.push("bus.stream_name must not be empty");
+    }
+    if config.bus.consumer_name.trim().is_empty() {
+        violations.push("bus.consumer_name must not be empty");
     }
     violations
 }
