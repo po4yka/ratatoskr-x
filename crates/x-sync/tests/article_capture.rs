@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use x_budget::gate::{BudgetGate, Clock};
+use x_budget::gate::{BudgetClass, BudgetGate, Clock};
 use x_persistence::test_support::TestDatabase;
 use x_sync::{
     ArticleCaptureService, BookmarkPage, BookmarkPageSource, BookmarkSnapshotService,
@@ -182,8 +182,14 @@ fn bookmark_snapshot_service(
     database: x_persistence::database::Database,
 ) -> BookmarkSnapshotService {
     let clock: Arc<dyn Clock> = Arc::new(FixedClock);
-    let budget = BudgetGate::with_clock(database.clone(), 10, 3_600, Arc::clone(&clock))
-        .expect("the fixture budget configuration is valid");
+    let budget = BudgetGate::with_clock(
+        database.clone(),
+        BudgetClass::Read,
+        10,
+        3_600,
+        Arc::clone(&clock),
+    )
+    .expect("the fixture budget configuration is valid");
     BookmarkSnapshotService::new(database, budget, clock)
 }
 

@@ -7,6 +7,7 @@ mod folders;
 mod incremental;
 mod knowledge;
 mod social_sources;
+mod writeback;
 
 pub use articles::{
     ArticleCaptureError, ArticleCaptureService, SelectedArticleUrl, select_external_expanded_urls,
@@ -27,6 +28,13 @@ pub use incremental::{
 };
 pub use knowledge::{
     KnowledgeAnalysisAdmission, KnowledgeAnalysisService, KnowledgeIntegrationError,
+};
+pub use writeback::{
+    BookmarkAction, BookmarkAdmissionRefusal, BookmarkDryRunOutcome, BookmarkDryRunResult,
+    BookmarkMutationProvider, BookmarkProviderError, BookmarkProviderEvidence,
+    BookmarkProviderSuccess, BookmarkWriteConsent, BookmarkWriteRequest, BookmarkWriteResult,
+    BookmarkWriteStatus, BookmarkWritebackError, BookmarkWritebackService, ConsentSurfaceId,
+    OfficialBookmarkProvider,
 };
 
 use std::collections::HashMap;
@@ -356,6 +364,8 @@ impl BookmarkSnapshotService {
         lock_finalization(&mut transaction, account_id, run).await?;
         let statistics =
             reconcile_bookmarks(&mut transaction, account_id, run, completed_at).await?;
+        reconcile_uncertain_bookmark_writes(&mut transaction, account_id, run, completed_at)
+            .await?;
         record_completion(&mut transaction, run, completed_at, statistics).await?;
         sqlx::query(
             "update x_archive.bookmark_incremental_state set requires_full_snapshot = false, \
@@ -515,6 +525,79 @@ async fn record_absent_bookmarks(
         .map_err(SnapshotError::Query)?;
     }
     u64::try_from(removed_bookmarks.len()).map_err(|_| SnapshotError::StatisticsOverflow)
+}
+
+async fn reconcile_uncertain_bookmark_writes(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    account_id: Uuid,
+    run: &Run,
+    completed_at: DateTime<Utc>,
+) -> Result<(), SnapshotError> {
+    let operations: Vec<(Uuid, String, bool)> = sqlx::query_as(
+        "select operation.id, operation.action, exists( \
+           select 1 from x_archive.snapshot_bookmark_items item \
+           join x_archive.posts post on post.id = item.post_id \
+           where item.snapshot_id = $2 and post.provider_id = operation.provider_post_id \
+         ) \
+         from x_archive.bookmark_write_operations operation \
+         where operation.account_id = $1 and operation.status = 'uncertain' \
+         for update",
+    )
+    .bind(account_id)
+    .bind(run.snapshot_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(SnapshotError::Query)?;
+    for (operation_id, action, present) in operations {
+        let requested_state_is_current =
+            (action == "add" && present) || (action == "remove" && !present);
+        let status = if requested_state_is_current {
+            "reconciled_succeeded"
+        } else {
+            "reconciled_not_current"
+        };
+        let outcome = if present {
+            "complete_snapshot_present"
+        } else {
+            "complete_snapshot_absent"
+        };
+        sqlx::query(
+            "update x_archive.bookmark_write_operations \
+             set status = $2, outcome = $3, projection_observed_at = $4, updated_at = $4 \
+             where id = $1 and status = 'uncertain'",
+        )
+        .bind(operation_id)
+        .bind(status)
+        .bind(outcome)
+        .bind(completed_at)
+        .execute(&mut **transaction)
+        .await
+        .map_err(SnapshotError::Query)?;
+        sqlx::query(
+            "insert into x_archive.bookmark_write_audit_events \
+             (id, account_id, operation_id, consent_id, internal_user_id, action, provider_post_id, \
+              surface, event_class, occurred_at, correlation_id, idempotency_digest, \
+              provider_request_id, details) \
+             select encode(set_byte(uuid_send(gen_random_uuid()), 0, 8), 'hex')::uuid, \
+                    operation.account_id, operation.id, operation.consent_id, \
+                    operation.internal_user_id, operation.action, operation.provider_post_id, \
+                    consent.surface, 'snapshot_reconciled', $2, operation.id::text, \
+                    operation.idempotency_digest, \
+                    operation.provider_request_id, \
+                    jsonb_build_object('snapshot_id', $3::text, 'result', $4::text) \
+             from x_archive.bookmark_write_operations operation \
+             join x_archive.bookmark_write_consents consent on consent.id = operation.consent_id \
+             where operation.id = $1",
+        )
+        .bind(operation_id)
+        .bind(completed_at)
+        .bind(run.snapshot_id.to_string())
+        .bind(status)
+        .execute(&mut **transaction)
+        .await
+        .map_err(SnapshotError::Query)?;
+    }
+    Ok(())
 }
 
 async fn record_completion(

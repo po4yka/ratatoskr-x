@@ -10,7 +10,7 @@
 
 use x_persistence::database::Database;
 
-/// The thirty-two tables the owned schema must contain, no more and no fewer.
+/// The thirty-six tables the owned schema must contain, no more and no fewer.
 const OWNED_TABLES: &[&str] = &[
     "accounts",
     "api_budget_windows",
@@ -20,6 +20,10 @@ const OWNED_TABLES: &[&str] = &[
     "bookmark_incremental_state",
     "bookmark_reconciliation_repairs",
     "bookmark_snapshot_authority",
+    "bookmark_write_audit_events",
+    "bookmark_write_authorizations",
+    "bookmark_write_consents",
+    "bookmark_write_operations",
     "bookmarks",
     "compliance_revalidation_ledger",
     "credentials",
@@ -515,6 +519,125 @@ async fn knowledge_linkage_and_compliance_inventory_is_owned_and_scoped() {
     assert!(
         missing.is_empty(),
         "Knowledge linkage and compliance evidence must be source-scoped; missing {missing:?}"
+    );
+}
+
+#[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one schema inventory scenario keeps table, constraint, and secret-leak assertions together"
+)]
+async fn bookmark_writeback_inventory_is_owned_scoped_and_secret_free() {
+    let (url, name, admin) = create_disposable_database().await;
+    let database = Database::connect(&url, 2)
+        .await
+        .expect("a pooled connection");
+    database.apply_schema().await.expect("the schema applies");
+
+    let mut missing = Vec::new();
+    let write_tables = [
+        "bookmark_write_authorizations",
+        "bookmark_write_consents",
+        "bookmark_write_operations",
+        "bookmark_write_audit_events",
+    ];
+    for table in write_tables {
+        let present: bool = sqlx::query_scalar(
+            "select count(*) > 0 from information_schema.tables \
+             where table_schema = 'x_archive' and table_name = $1",
+        )
+        .bind(table)
+        .fetch_one(database.pool())
+        .await
+        .expect("the write-back table catalog is readable");
+        if !present {
+            missing.push(format!("table {table}"));
+        }
+    }
+
+    for (table, column) in [
+        ("oauth_intents", "purpose"),
+        ("oauth_intents", "account_id"),
+        ("credentials", "activation_outcome"),
+        ("api_budget_windows", "budget_class"),
+        ("bookmarks", "last_write_operation_id"),
+        ("bookmarks", "last_write_observed_at"),
+        ("bookmarks", "observed_removed_write_operation_id"),
+    ] {
+        let present: bool = sqlx::query_scalar(
+            "select count(*) > 0 from information_schema.columns \
+             where table_schema = 'x_archive' and table_name = $1 and column_name = $2",
+        )
+        .bind(table)
+        .bind(column)
+        .fetch_one(database.pool())
+        .await
+        .expect("the write-back column catalog is readable");
+        if !present {
+            missing.push(format!("{table}.{column}"));
+        }
+    }
+
+    let oauth_account_is_scoped: bool = sqlx::query_scalar(
+        "select count(*) > 0 from pg_constraint con \
+         join pg_class rel on rel.oid = con.conrelid \
+         join pg_namespace ns on ns.oid = rel.relnamespace \
+         join pg_class target on target.oid = con.confrelid \
+         where ns.nspname = 'x_archive' and rel.relname = 'oauth_intents' \
+           and target.relname = 'accounts' and con.contype = 'f'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the OAuth intent constraints are readable");
+    if !oauth_account_is_scoped {
+        missing.push("oauth_intents account foreign key".to_owned());
+    }
+
+    let budget_primary_key_is_classed: bool = sqlx::query_scalar(
+        "select count(*) > 0 from pg_indexes \
+         where schemaname = 'x_archive' and tablename = 'api_budget_windows' \
+           and indexdef ilike '%unique%' and indexdef ilike '%account_id%' \
+           and indexdef ilike '%budget_class%' and indexdef ilike '%window_start%'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the budget-window indexes are readable");
+    if !budget_primary_key_is_classed {
+        missing.push("classed api_budget_windows identity".to_owned());
+    }
+
+    let leaked_columns: Vec<String> = sqlx::query_scalar(
+        "select concat(table_name, '.', column_name) from information_schema.columns \
+         where table_schema = 'x_archive' and table_name = any($1) \
+           and column_name = any($2) order by table_name, column_name",
+    )
+    .bind(&write_tables[..])
+    .bind(
+        &[
+            "access_token",
+            "refresh_token",
+            "authorization_header",
+            "bearer_header",
+            "raw_body",
+            "post_body",
+            "post_text",
+        ][..],
+    )
+    .fetch_all(database.pool())
+    .await
+    .expect("write-back columns can be checked for credential and content leaks");
+
+    database.pool().close().await;
+    drop_disposable_database(&name, &admin).await;
+    admin.close().await;
+
+    assert!(
+        missing.is_empty(),
+        "bookmark write-back schema must be owned and account-scoped; missing {missing:?}"
+    );
+    assert!(
+        leaked_columns.is_empty(),
+        "bookmark write-back evidence must not retain credentials or post bodies: {leaked_columns:?}"
     );
 }
 

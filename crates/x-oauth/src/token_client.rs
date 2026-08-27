@@ -31,6 +31,7 @@ pub(crate) struct TokenResponse {
 pub struct TokenClient {
     http: reqwest::Client,
     token_url: String,
+    authenticated_user_url: String,
     revocation_url: String,
     client_id: Option<String>,
     client_secret: Option<String>,
@@ -52,9 +53,14 @@ impl TokenClient {
             .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|_| FlowError::Transport)?;
+        let authenticated_user_url = reqwest::Url::parse(&oauth.token_url)
+            .and_then(|url| url.join("/2/users/me"))
+            .map_err(|_| FlowError::Configuration)?
+            .to_string();
         Ok(Self {
             http,
             token_url: oauth.token_url.clone(),
+            authenticated_user_url,
             revocation_url: oauth.revocation_url.clone(),
             client_id: oauth.client_id.clone(),
             client_secret: oauth.client_secret.clone(),
@@ -80,6 +86,31 @@ impl TokenClient {
             ("code_verifier", code_verifier),
         ];
         self.post_token_form(&fields).await
+    }
+
+    /// Resolves the provider identity authenticated by a newly exchanged access token.
+    ///
+    /// # Errors
+    /// When the endpoint is unreachable, refuses the credential, or returns an
+    /// unusable bounded response.
+    pub(crate) async fn authenticated_user_id(
+        &self,
+        access_token: &str,
+    ) -> Result<String, FlowError> {
+        let response = self
+            .http
+            .get(&self.authenticated_user_url)
+            .bearer_auth(access_token)
+            .send()
+            .await
+            .map_err(|_| FlowError::Transport)?;
+        let (status, body) = bounded_response(response).await?;
+        if !status.is_success() {
+            return Err(FlowError::UpstreamInvalidation);
+        }
+        let data =
+            extract_object_member(&body, "data")?.ok_or(FlowError::MalformedProviderResponse)?;
+        extract_string_member(data, "id")?.ok_or(FlowError::MalformedProviderResponse)
     }
 
     /// Refreshes tokens by presenting a current refresh token.
@@ -138,19 +169,26 @@ impl TokenClient {
             request = request.basic_auth(id, Some(secret));
         }
         let response = request.send().await.map_err(|_| FlowError::Transport)?;
-        let status = response.status();
-        if response
-            .content_length()
-            .is_some_and(|len| len > MAX_BODY_BYTES as u64)
-        {
-            return Err(FlowError::MalformedProviderResponse);
-        }
-        let bytes = response.bytes().await.map_err(|_| FlowError::Transport)?;
-        if bytes.len() > MAX_BODY_BYTES {
-            return Err(FlowError::MalformedProviderResponse);
-        }
-        Ok((status, String::from_utf8_lossy(bytes.as_ref()).into_owned()))
+        bounded_response(response).await
     }
+}
+
+/// Reads one provider response under the adapter's hard body bound.
+async fn bounded_response(
+    response: reqwest::Response,
+) -> Result<(reqwest::StatusCode, String), FlowError> {
+    let status = response.status();
+    if response
+        .content_length()
+        .is_some_and(|len| len > MAX_BODY_BYTES as u64)
+    {
+        return Err(FlowError::MalformedProviderResponse);
+    }
+    let bytes = response.bytes().await.map_err(|_| FlowError::Transport)?;
+    if bytes.len() > MAX_BODY_BYTES {
+        return Err(FlowError::MalformedProviderResponse);
+    }
+    Ok((status, String::from_utf8_lossy(bytes.as_ref()).into_owned()))
 }
 
 /// Percent-encodes one `application/x-www-form-urlencoded` component, keeping
@@ -318,6 +356,23 @@ fn extract_string_member(body: &str, key: &str) -> Result<Option<String>, FlowEr
         }
     }
     Err(malformed())
+}
+
+/// Extracts one object-valued top-level member without exposing the raw response.
+fn extract_object_member<'a>(body: &'a str, key: &str) -> Result<Option<&'a str>, FlowError> {
+    let malformed = || FlowError::MalformedProviderResponse;
+    let found = split_top_level_members(body)?
+        .into_iter()
+        .find(|(candidate, _)| *candidate == key)
+        .map(|(_, value)| value);
+    let Some(raw) = found else {
+        return Ok(None);
+    };
+    if raw.starts_with('{') && raw.ends_with('}') {
+        Ok(Some(raw))
+    } else {
+        Err(malformed())
+    }
 }
 
 /// Extracts one number-valued top-level member as a `u64`.

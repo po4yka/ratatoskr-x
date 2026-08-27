@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
-use x_budget::gate::{BudgetGate, Clock};
+use x_budget::gate::{BudgetClass, BudgetGate, Clock};
 use x_persistence::test_support::TestDatabase;
 use x_sync::{
     BookmarkPage, BookmarkPageSource, BookmarkSourceError, IncrementalOutcome,
@@ -84,8 +84,14 @@ fn service(database: x_persistence::database::Database) -> IncrementalScanServic
         .parse()
         .expect("the fixture instant parses");
     let clock: Arc<dyn Clock> = Arc::new(FakeClock { instant });
-    let budget = BudgetGate::with_clock(database.clone(), 10, 3_600, Arc::clone(&clock))
-        .expect("the budget gate accepts the fixture configuration");
+    let budget = BudgetGate::with_clock(
+        database.clone(),
+        BudgetClass::Read,
+        10,
+        3_600,
+        Arc::clone(&clock),
+    )
+    .expect("the budget gate accepts the fixture configuration");
     IncrementalScanService::new(database, budget, clock, 3, 3)
 }
 
@@ -166,8 +172,14 @@ async fn page_bound_gap_requires_a_full_rescan() {
         .parse()
         .expect("the fixture instant parses");
     let clock: Arc<dyn Clock> = Arc::new(FakeClock { instant });
-    let budget = BudgetGate::with_clock(test.database.clone(), 10, 3_600, Arc::clone(&clock))
-        .expect("the budget gate accepts the fixture configuration");
+    let budget = BudgetGate::with_clock(
+        test.database.clone(),
+        BudgetClass::Read,
+        10,
+        3_600,
+        Arc::clone(&clock),
+    )
+    .expect("the budget gate accepts the fixture configuration");
 
     let outcome = IncrementalScanService::new(test.database.clone(), budget, clock, 1, 3)
         .run(account, &source)
@@ -209,8 +221,14 @@ async fn budget_refusal_stops_before_incremental_provider_contact() {
         .parse()
         .expect("the fixture instant parses");
     let clock: Arc<dyn Clock> = Arc::new(FakeClock { instant });
-    let budget = BudgetGate::with_clock(test.database.clone(), 1, 3_600, Arc::clone(&clock))
-        .expect("the budget gate accepts the fixture configuration");
+    let budget = BudgetGate::with_clock(
+        test.database.clone(),
+        BudgetClass::Read,
+        1,
+        3_600,
+        Arc::clone(&clock),
+    )
+    .expect("the budget gate accepts the fixture configuration");
     budget
         .reserve(account, 1)
         .await

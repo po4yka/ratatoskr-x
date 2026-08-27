@@ -2425,6 +2425,7 @@ dependencies = [
  "reqwest",
  "serde_json",
  "sha2 0.11.0",
+ "sqlx",
  "thiserror",
  "tokio",
  "uuid",
@@ -2453,13 +2454,16 @@ dependencies = [
  "ratatoskr-social-contracts",
  "ratatoskr-x-budget",
  "ratatoskr-x-normalize",
+ "ratatoskr-x-oauth",
  "ratatoskr-x-persistence",
+ "reqwest",
  "serde_json",
  "sha2 0.11.0",
  "sqlx",
  "thiserror",
  "tokio",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]

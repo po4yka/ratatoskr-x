@@ -11,6 +11,10 @@ use crate::error::PersistenceError;
 pub struct NewIntent<'a> {
     /// The internal user requesting the connection.
     pub internal_user_id: sqlx::types::Uuid,
+    /// The existing account bound to a bookmark-write extension intent.
+    pub account_id: Option<sqlx::types::Uuid>,
+    /// The closed authorization purpose token.
+    pub purpose: &'a str,
     /// The lowercase SHA-256 hex digest of the state string.
     pub state_hash: &'a str,
     /// The sealed PKCE verifier envelope bytes.
@@ -34,6 +38,10 @@ pub struct IntentRow {
     pub id: sqlx::types::Uuid,
     /// The internal user the intent belongs to.
     pub internal_user_id: sqlx::types::Uuid,
+    /// The existing account bound to a bookmark-write extension intent.
+    pub account_id: Option<sqlx::types::Uuid>,
+    /// The closed authorization purpose token.
+    pub purpose: String,
     /// The state digest the row is keyed by.
     pub state_hash: String,
     /// The still-sealed verifier envelope bytes.
@@ -63,13 +71,15 @@ pub async fn insert_intent(
     let row = sqlx::query_as::<_, (sqlx::types::Uuid,)>(
         r"
         INSERT INTO x_archive.oauth_intents
-            (internal_user_id, state_hash, code_verifier_encrypted, nonce,
+            (internal_user_id, account_id, purpose, state_hash, code_verifier_encrypted, nonce,
              redirect_uri, requested_scopes, created_at, expires_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id
         ",
     )
     .bind(intent.internal_user_id)
+    .bind(intent.account_id)
+    .bind(intent.purpose)
     .bind(intent.state_hash)
     .bind(intent.code_verifier_encrypted)
     .bind(intent.nonce)
@@ -93,7 +103,7 @@ pub async fn find_intent_by_state_hash(
 ) -> Result<Option<IntentRow>, PersistenceError> {
     let row = sqlx::query(
         r"
-        SELECT id, internal_user_id, state_hash, code_verifier_encrypted, nonce,
+        SELECT id, internal_user_id, account_id, purpose, state_hash, code_verifier_encrypted, nonce,
                redirect_uri, requested_scopes, created_at, expires_at, consumed_at
           FROM x_archive.oauth_intents
          WHERE state_hash = $1
@@ -116,6 +126,8 @@ fn intent_from_row(row: &sqlx::postgres::PgRow) -> Result<IntentRow, sqlx::error
     Ok(IntentRow {
         id: row.try_get("id")?,
         internal_user_id: row.try_get("internal_user_id")?,
+        account_id: row.try_get("account_id")?,
+        purpose: row.try_get("purpose")?,
         state_hash: row.try_get("state_hash")?,
         code_verifier_encrypted: row.try_get("code_verifier_encrypted")?,
         nonce: row.try_get("nonce")?,

@@ -335,24 +335,29 @@ Folder listing and membership reconciliation may require separate API calls and 
 
 ## 10. Write-back architecture
 
-Supported write operations may include:
+The implemented write surface is closed to:
 
 - add bookmark;
 - remove bookmark;
-- add/remove folder membership when officially supported.
 
-Requirements:
+Admission and execution require:
 
-- explicit write consent and scope;
-- user confirmation for destructive removal;
-- idempotency key;
-- per-account serialization where needed;
-- current-state check;
-- provider response and audit record;
-- truthful partial success;
+- a separately completed OAuth re-consent whose current account credential and local authorization
+  preserve the read scopes and add only `bookmark.write`;
+- one expiring per-action consent recording owner, account, action, target, approval instant, and
+  initiating surface;
+- an account-scoped idempotency key claimed durably before side effects;
+- the isolated hard bookmark-write budget, never the read/sync allowance;
+- a dry-run path that evaluates the same local gates with no consent, budget, provider, or
+  projection effect;
+- a bounded no-retry provider adapter and secret-free append-only audit evidence;
+- confirmed-write projection evidence distinct from full-snapshot absence authority;
+- durable uncertainty resolved only by a later complete successful snapshot;
 - no automatic mutation based on LLM output or source text.
 
-A failed local indexing step does not roll back a successful provider bookmark mutation.
+Posting, liking, reposting, native-folder writes, bulk mutations, and all other X writes are absent
+from the public adapter. There is no external command, HTTP route, or UI wiring in this change, so
+the application service is callable production code but not a deployed end-user capability.
 
 ## 11. Post normalization and linked articles
 

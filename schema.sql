@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS x_archive.credentials (
     encrypted_payload bytea NOT NULL,
     granted_scopes    text[] NOT NULL,
     status            text NOT NULL CHECK (status IN ('active', 'expired', 'revoked')),
+    activation_outcome text NOT NULL DEFAULT 'accepted'
+        CHECK (activation_outcome IN ('accepted', 'scope_downgrade',
+                                      'provider_identity_mismatch')),
     expires_at        timestamptz,
     superseded_refresh_hash text,
     created_at        timestamptz NOT NULL DEFAULT now()
@@ -45,6 +48,9 @@ CREATE TABLE IF NOT EXISTS x_archive.credentials (
 CREATE TABLE IF NOT EXISTS x_archive.oauth_intents (
     id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     internal_user_id       uuid NOT NULL,
+    account_id             uuid REFERENCES x_archive.accounts (id),
+    purpose                text NOT NULL DEFAULT 'read_connection'
+        CHECK (purpose IN ('read_connection', 'bookmark_write')),
     state_hash             text NOT NULL UNIQUE,
     code_verifier_encrypted bytea NOT NULL,
     nonce                  text NOT NULL,
@@ -52,18 +58,103 @@ CREATE TABLE IF NOT EXISTS x_archive.oauth_intents (
     requested_scopes       text[] NOT NULL,
     created_at             timestamptz NOT NULL,
     expires_at             timestamptz NOT NULL,
-    consumed_at            timestamptz
+    consumed_at            timestamptz,
+    CHECK ((purpose = 'read_connection' AND account_id IS NULL)
+        OR (purpose = 'bookmark_write' AND account_id IS NOT NULL))
 );
 
 -- Fixed request-budget windows per account. Historical rows are immutable once
 -- a later window exists; the gate charges usage before any provider call.
 CREATE TABLE IF NOT EXISTS x_archive.api_budget_windows (
     account_id     uuid NOT NULL REFERENCES x_archive.accounts (id),
+    budget_class   text NOT NULL DEFAULT 'read'
+        CHECK (budget_class IN ('read', 'bookmark_write')),
     window_start   timestamptz NOT NULL,
     window_seconds integer NOT NULL CHECK (window_seconds > 0),
     request_cap    integer NOT NULL CHECK (request_cap > 0),
     used_requests  integer NOT NULL DEFAULT 0 CHECK (used_requests >= 0),
-    PRIMARY KEY (account_id, window_start)
+    PRIMARY KEY (account_id, budget_class, window_start)
+);
+
+-- OAuth permission and per-action user consent are separate gates. This row records only the
+-- separately granted provider scope state; the encrypted token remains in credentials.
+CREATE TABLE IF NOT EXISTS x_archive.bookmark_write_authorizations (
+    account_id       uuid PRIMARY KEY REFERENCES x_archive.accounts (id),
+    oauth_intent_id  uuid NOT NULL REFERENCES x_archive.oauth_intents (id),
+    granted_scopes   text[] NOT NULL,
+    status           text NOT NULL CHECK (status IN ('active', 'revoked')),
+    authorized_at    timestamptz NOT NULL,
+    revoked_at       timestamptz,
+    updated_at       timestamptz NOT NULL DEFAULT now(),
+    CHECK ((status = 'active' AND revoked_at IS NULL)
+        OR (status = 'revoked' AND revoked_at IS NOT NULL))
+);
+
+-- One immutable approval capability, bound to exactly one owner/account/action/target/surface.
+-- Dry runs may inspect it; at most one live operation consumes it.
+CREATE TABLE IF NOT EXISTS x_archive.bookmark_write_consents (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id        uuid NOT NULL REFERENCES x_archive.accounts (id),
+    internal_user_id  uuid NOT NULL,
+    action            text NOT NULL CHECK (action IN ('add', 'remove')),
+    provider_post_id  text NOT NULL CHECK (provider_post_id ~ '^[0-9]{1,19}$'),
+    approved_at       timestamptz NOT NULL,
+    expires_at        timestamptz NOT NULL,
+    surface           text NOT NULL CHECK (surface ~ '^[a-z0-9][a-z0-9._-]{0,63}$'),
+    consumed_at       timestamptz,
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    CHECK (expires_at > approved_at)
+);
+
+-- One account-scoped idempotency claim. Provider bodies and credentials are deliberately absent;
+-- only bounded request/result classification and provider request identity are retained.
+CREATE TABLE IF NOT EXISTS x_archive.bookmark_write_operations (
+    id                       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id               uuid NOT NULL REFERENCES x_archive.accounts (id),
+    internal_user_id         uuid NOT NULL,
+    consent_id               uuid REFERENCES x_archive.bookmark_write_consents (id),
+    action                   text NOT NULL CHECK (action IN ('add', 'remove')),
+    provider_post_id         text NOT NULL CHECK (provider_post_id ~ '^[0-9]{1,19}$'),
+    execution_mode           text NOT NULL CHECK (execution_mode IN ('live', 'dry_run')),
+    idempotency_digest       text NOT NULL,
+    request_fingerprint      text NOT NULL,
+    status                   text NOT NULL
+        CHECK (status IN ('received', 'refused', 'dry_run', 'provider_in_flight',
+                          'succeeded', 'failed', 'uncertain', 'projection_pending',
+                          'reconciled_succeeded', 'reconciled_not_current')),
+    outcome                  text,
+    provider_request_id      text,
+    rate_limit_reset_at      timestamptz,
+    projection_observed_at   timestamptz,
+    created_at               timestamptz NOT NULL DEFAULT now(),
+    updated_at               timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (account_id, idempotency_digest)
+);
+
+-- Append-only application evidence. Details are a bounded classified object, never a raw provider
+-- response, post body, or authorization header.
+CREATE TABLE IF NOT EXISTS x_archive.bookmark_write_audit_events (
+    id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id            uuid NOT NULL REFERENCES x_archive.accounts (id),
+    operation_id          uuid REFERENCES x_archive.bookmark_write_operations (id),
+    consent_id            uuid REFERENCES x_archive.bookmark_write_consents (id),
+    internal_user_id      uuid NOT NULL,
+    action                text NOT NULL CHECK (action IN ('add', 'remove')),
+    provider_post_id      text NOT NULL CHECK (provider_post_id ~ '^[0-9]{1,19}$'),
+    surface               text NOT NULL CHECK (surface ~ '^[a-z0-9][a-z0-9._-]{0,63}$'),
+    event_class           text NOT NULL
+        CHECK (event_class IN ('consent_recorded', 'request_received', 'gate_admitted',
+                               'gate_refused', 'dry_run_completed', 'idempotent_replay',
+                               'idempotency_conflict', 'budget_refused', 'provider_attempted',
+                               'provider_classified', 'projection_reconciled',
+                               'outcome_uncertain', 'operation_completed',
+                               'snapshot_reconciled')),
+    occurred_at           timestamptz NOT NULL,
+    correlation_id        text,
+    idempotency_digest    text,
+    provider_request_id   text,
+    details               jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(details) = 'object'),
+    CHECK (operation_id IS NOT NULL OR consent_id IS NOT NULL)
 );
 
 CREATE TABLE IF NOT EXISTS x_archive.posts (
@@ -131,6 +222,11 @@ CREATE TABLE IF NOT EXISTS x_archive.bookmarks (
     last_observed_saved_at  timestamptz NOT NULL DEFAULT now(),
     observed_removed_at     timestamptz,
     observed_removed_snapshot_id uuid,
+    -- Provider-confirmed writes are observation evidence distinct from full-snapshot authority.
+    last_write_operation_id uuid REFERENCES x_archive.bookmark_write_operations (id),
+    last_write_observed_at timestamptz,
+    observed_removed_write_operation_id uuid
+        REFERENCES x_archive.bookmark_write_operations (id),
     last_incremental_run_id uuid,
     UNIQUE (account_id, post_id)
 );

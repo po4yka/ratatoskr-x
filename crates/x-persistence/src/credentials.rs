@@ -63,6 +63,30 @@ pub async fn insert_with_status(
     Ok(row.0)
 }
 
+/// Persists secret-free evidence for a bookmark-write grant that was not activated.
+///
+/// # Errors
+/// When the observation cannot be inserted.
+pub async fn insert_rejected_write_grant(
+    db: &Database,
+    account_id: sqlx::types::Uuid,
+    granted_scopes: &[String],
+    activation_outcome: &str,
+) -> Result<sqlx::types::Uuid, PersistenceError> {
+    let id = sqlx::query_scalar(
+        "insert into x_archive.credentials \
+         (account_id, encrypted_payload, granted_scopes, status, activation_outcome) \
+         values ($1, ''::bytea, $2, 'expired', $3) returning id",
+    )
+    .bind(account_id)
+    .bind(granted_scopes)
+    .bind(activation_outcome)
+    .fetch_one(db.pool())
+    .await
+    .map_err(PersistenceError::Query)?;
+    Ok(id)
+}
+
 /// Reads the most recent credential of an account regardless of status.
 ///
 /// # Errors

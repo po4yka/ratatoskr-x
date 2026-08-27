@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use ratatoskr_event_envelope::CommandEnvelope;
 use ratatoskr_social_contracts::{RemovalReason, SocialSourceRemoved};
-use x_budget::gate::{BudgetGate, Clock};
+use x_budget::gate::{BudgetClass, BudgetGate, Clock};
 use x_persistence::test_support::TestDatabase;
 use x_sync::{
     ComplianceAvailability, ComplianceObservation, ComplianceRevalidationService,
@@ -150,8 +150,14 @@ fn service(database: x_persistence::database::Database) -> ComplianceRevalidatio
             .parse()
             .expect("the fixture instant parses"),
     ));
-    let budget = BudgetGate::with_clock(database.clone(), 10, 3_600, Arc::clone(&clock))
-        .expect("the budget configuration is valid");
+    let budget = BudgetGate::with_clock(
+        database.clone(),
+        BudgetClass::Read,
+        10,
+        3_600,
+        Arc::clone(&clock),
+    )
+    .expect("the budget configuration is valid");
     ComplianceRevalidationService::new(database, budget, clock)
 }
 

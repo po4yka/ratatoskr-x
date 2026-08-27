@@ -9,7 +9,10 @@
 7. Publish normalized SocialSource and linked-article extraction events.
 8. Add Knowledge integration and compliance revalidation. *(implemented: durable application
    services and contracts; runtime scheduler/provider adapter/outbox transport wiring pending)*
-9. Add separately consented idempotent bookmark write-back.
+9. Add separately consented idempotent bookmark write-back. *(implemented: add/remove-only library
+   service, separate OAuth and per-action consent, dry run, isolated budget, official adapter,
+   uncertainty reconciliation, and append-only audit; external authenticated runtime/UI wiring is
+   pending a workspace change)*
 10. Import Field Theory data, compare shadow snapshots, then cut over.
 
 Definition of Done: no false removals, read/write scopes secure, cost bounded, private content authorized, schema/events/tests and the planned workspace vertical slice pass. Deferred: DMs and broad account/social graph ingestion.

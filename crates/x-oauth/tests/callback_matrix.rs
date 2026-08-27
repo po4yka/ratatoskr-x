@@ -69,6 +69,8 @@ async fn seed_intent(
     let state_hash = callback::state_digest(state);
     let intent = NewIntent {
         internal_user_id: user,
+        account_id: None,
+        purpose: "read_connection",
         state_hash: &state_hash,
         code_verifier_encrypted: Box::leak(sealed.into_boxed_slice()),
         nonce: "intent-nonce-observation",
@@ -101,6 +103,11 @@ async fn valid_callback_is_accepted_once_exposing_binding_and_verifier() {
 
     match resolution {
         CallbackResolution::Accepted(accepted) => {
+            assert_ne!(
+                accepted.intent_id,
+                uuid::Uuid::nil(),
+                "the persisted intent id survives"
+            );
             assert_eq!(
                 accepted.internal_user_id, user,
                 "the acceptance exposes the internal-user binding"

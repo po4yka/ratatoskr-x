@@ -14,6 +14,13 @@ const APPENDIX_VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 /// RFC 7636 Appendix B expected S256 challenge.
 const APPENDIX_CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
+/// Returns the still-percent-encoded scope query value from an authorization URL.
+fn scope_query_value(url: &str) -> &str {
+    url.split('&')
+        .find_map(|part| part.strip_prefix("scope="))
+        .expect("the authorization URL carries one scope parameter")
+}
+
 #[test]
 fn challenge_matches_rfc7636_appendix_vector() {
     let challenge = pkce::challenge_from_verifier(APPENDIX_VERIFIER);
@@ -57,8 +64,8 @@ fn authorization_url_carries_minimized_read_consent_without_leaking_verifier() {
     oauth.redirect_uri = Some("https://app.example/callback".to_owned());
     let issued = intent::AuthorizationIntent::issue();
 
-    let url =
-        intent::authorization_url(&oauth, &issued).expect("a configured client builds the URL");
+    let url = intent::authorization_url(&oauth, &issued, intent::IntentPurpose::ReadConnection)
+        .expect("a configured client builds the URL");
 
     assert!(
         url.starts_with(oauth.authorize_url.as_str()),
@@ -95,5 +102,41 @@ fn authorization_url_carries_minimized_read_consent_without_leaking_verifier() {
     assert!(
         !url.contains(&issued.code_verifier),
         "the verifier must never appear in the authorization URL: {url}"
+    );
+}
+
+#[test]
+fn bookmark_write_intent_adds_only_bookmark_write_while_default_stays_read_only() {
+    use x_oauth::intent::{self, IntentPurpose};
+
+    let mut oauth = x_core::config::XConfig::default().oauth;
+    oauth.client_id = Some("client-write-consent".to_owned());
+    oauth.redirect_uri = Some("https://app.example/callback".to_owned());
+    let issued = intent::AuthorizationIntent::issue();
+    let read_url = intent::authorization_url(&oauth, &issued, IntentPurpose::ReadConnection)
+        .expect("the default read intent builds");
+    let write_url = intent::authorization_url(
+        &oauth,
+        &issued,
+        IntentPurpose::BookmarkWrite {
+            account_id: uuid::Uuid::now_v7(),
+        },
+    )
+    .expect("the bookmark-write intent builds");
+
+    let read_scope = scope_query_value(&read_url);
+    let write_scope = scope_query_value(&write_url);
+
+    assert_eq!(
+        read_scope, "users.read%20tweet.read%20bookmark.read%20offline.access",
+        "the default intent stays on the exact minimized read set"
+    );
+    assert_ne!(
+        write_scope, read_scope,
+        "the separately consented write intent must not reuse the read-only scope set"
+    );
+    assert_eq!(
+        write_scope, "users.read%20tweet.read%20bookmark.read%20offline.access%20bookmark.write",
+        "the write intent adds exactly bookmark.write to the read prerequisites"
     );
 }

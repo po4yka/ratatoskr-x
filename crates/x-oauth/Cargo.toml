@@ -26,6 +26,7 @@ uuid.workspace                   = true
 [dev-dependencies]
 ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
 serde_json.workspace    = true
+sqlx.workspace          = true
 tokio.workspace         = true
 wiremock.workspace      = true
 

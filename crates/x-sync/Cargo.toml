@@ -20,16 +20,19 @@ ratatoskr-operation-contracts.workspace = true
 ratatoskr-social-contracts.workspace = true
 ratatoskr-x-budget.workspace        = true
 ratatoskr-x-normalize.workspace     = true
+ratatoskr-x-oauth.workspace         = true
 ratatoskr-x-persistence.workspace   = true
+reqwest.workspace                   = true
 serde_json.workspace                = true
 sha2.workspace                      = true
 sqlx.workspace                      = true
 thiserror.workspace                 = true
+tokio = { workspace = true, features = ["sync"] }
 uuid.workspace                      = true
 
 [dev-dependencies]
 ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
-tokio = { workspace = true, features = ["sync"] }
+wiremock.workspace = true
 
 [lints]
 workspace = true

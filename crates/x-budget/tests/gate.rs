@@ -11,7 +11,7 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, TimeDelta, Utc};
-use x_budget::gate::{BudgetError, BudgetGate, Clock};
+use x_budget::gate::{BudgetClass, BudgetError, BudgetGate, Clock};
 use x_persistence::budget_windows::window_usage;
 use x_persistence::database::Database;
 use x_persistence::test_support::TestDatabase;
@@ -82,11 +82,95 @@ async fn seed_account(database: &Database, provider_user_id: &str) -> uuid::Uuid
 fn gate_with_fake_clock(database: Database, clock: &Arc<FakeClock>, cap: u32) -> BudgetGate {
     BudgetGate::with_clock(
         database,
+        BudgetClass::Read,
         cap,
         WINDOW_SECONDS,
         Arc::clone(clock) as Arc<dyn Clock>,
     )
     .expect("the gate constructs from valid settings")
+}
+
+#[tokio::test]
+async fn bookmark_write_budget_is_isolated_and_inspection_is_non_consuming() {
+    let test = TestDatabase::create().await.expect("a disposable database");
+    let account = seed_account(&test.database, "budget-gate-write-isolation").await;
+    let clock = Arc::new(FakeClock::at_base_instant());
+    let read = BudgetGate::with_clock(
+        test.database.clone(),
+        BudgetClass::Read,
+        10,
+        WINDOW_SECONDS,
+        Arc::clone(&clock) as Arc<dyn Clock>,
+    )
+    .expect("the read gate constructs");
+    let write = BudgetGate::with_clock(
+        test.database.clone(),
+        BudgetClass::BookmarkWrite,
+        10,
+        WINDOW_SECONDS,
+        Arc::clone(&clock) as Arc<dyn Clock>,
+    )
+    .expect("the bookmark-write gate constructs");
+
+    read.reserve(account, 7)
+        .await
+        .expect("read usage fits its class");
+    write
+        .reserve(account, 3)
+        .await
+        .expect("write usage fits its independent class");
+    let read_follow_up = read.reserve(account, 3).await;
+    let over_cap_write_inspection = write
+        .inspect(account, 8)
+        .await
+        .expect("write eligibility can be inspected");
+    let inspect_account = seed_account(&test.database, "budget-gate-inspection-only").await;
+    let before_inspect = window_usage(
+        test.database.pool(),
+        inspect_account,
+        BudgetClass::BookmarkWrite.as_str(),
+        expected_window_start(base_instant()),
+    )
+    .await
+    .expect("absence of an inspection-only window is readable");
+    let inspection = write
+        .inspect(inspect_account, 1)
+        .await
+        .expect("inspection returns an admission result");
+    let after_inspect = window_usage(
+        test.database.pool(),
+        inspect_account,
+        BudgetClass::BookmarkWrite.as_str(),
+        expected_window_start(base_instant()),
+    )
+    .await
+    .expect("absence remains readable after inspection");
+
+    test.cleanup().await.expect("cleanup drops the database");
+
+    assert_eq!(
+        before_inspect, None,
+        "an unused account has no durable window before inspection"
+    );
+    assert_eq!(
+        after_inspect, before_inspect,
+        "inspection neither creates nor changes durable usage"
+    );
+    assert!(
+        read_follow_up.is_ok(),
+        "bookmark-write usage cannot spend the read allowance: {read_follow_up:?}"
+    );
+    assert!(
+        !over_cap_write_inspection.eligible,
+        "cost above the write allowance's remainder is ineligible"
+    );
+    assert!(inspection.eligible, "an unused write allowance is eligible");
+    assert_eq!(
+        inspection.reset_at,
+        expected_window_start(base_instant())
+            + TimeDelta::try_seconds(WINDOW_SECONDS).expect("a small window"),
+        "inspection reports the current class window reset"
+    );
 }
 
 #[tokio::test]
@@ -110,9 +194,14 @@ async fn reservation_within_cap_counts_durably_across_instances() {
         .reserve(account, 2)
         .await
         .expect("reservations stay accepted until the cap is reached");
-    let persisted = window_usage(test.database.pool(), account, initial.window_start)
-        .await
-        .expect("the usage query succeeds");
+    let persisted = window_usage(
+        test.database.pool(),
+        account,
+        BudgetClass::Read.as_str(),
+        initial.window_start,
+    )
+    .await
+    .expect("the usage query succeeds");
 
     test.cleanup().await.expect("cleanup drops the database");
 
@@ -148,9 +237,14 @@ async fn over_cap_reservation_is_blocked_before_any_call_and_charges_nothing() {
         .await
         .expect("the first reservation fits under the cap");
     let blocked = gate.reserve(account, 5).await;
-    let persisted = window_usage(test.database.pool(), account, charged.window_start)
-        .await
-        .expect("the usage query succeeds");
+    let persisted = window_usage(
+        test.database.pool(),
+        account,
+        BudgetClass::Read.as_str(),
+        charged.window_start,
+    )
+    .await
+    .expect("the usage query succeeds");
 
     test.cleanup().await.expect("cleanup drops the database");
 
@@ -188,12 +282,22 @@ async fn expired_window_opens_fresh_zeroed_window() {
         .reserve(account, 10)
         .await
         .expect("a fresh window evaluates against the full cap");
-    let superseded_usage = window_usage(test.database.pool(), account, superseded.window_start)
-        .await
-        .expect("the superseded window is readable");
-    let fresh_usage = window_usage(test.database.pool(), account, fresh.window_start)
-        .await
-        .expect("the fresh window is readable");
+    let superseded_usage = window_usage(
+        test.database.pool(),
+        account,
+        BudgetClass::Read.as_str(),
+        superseded.window_start,
+    )
+    .await
+    .expect("the superseded window is readable");
+    let fresh_usage = window_usage(
+        test.database.pool(),
+        account,
+        BudgetClass::Read.as_str(),
+        fresh.window_start,
+    )
+    .await
+    .expect("the fresh window is readable");
 
     test.cleanup().await.expect("cleanup drops the database");
 
@@ -242,9 +346,14 @@ async fn racing_reservations_never_exceed_the_cap() {
     while let Some(joined) = racers.join_next().await {
         outcomes.push(joined.expect("no racer task panics"));
     }
-    let persisted = window_usage(test.database.pool(), account, seeded.window_start)
-        .await
-        .expect("the usage query succeeds");
+    let persisted = window_usage(
+        test.database.pool(),
+        account,
+        BudgetClass::Read.as_str(),
+        seeded.window_start,
+    )
+    .await
+    .expect("the usage query succeeds");
 
     test.cleanup().await.expect("cleanup drops the database");
 
@@ -291,15 +400,25 @@ async fn refund_releases_failed_cost_without_driving_usage_negative() {
     gate.refund(account, charged.window_start, 4)
         .await
         .expect("a partial refund succeeds");
-    let after_partial = window_usage(test.database.pool(), account, charged.window_start)
-        .await
-        .expect("the usage query succeeds");
+    let after_partial = window_usage(
+        test.database.pool(),
+        account,
+        BudgetClass::Read.as_str(),
+        charged.window_start,
+    )
+    .await
+    .expect("the usage query succeeds");
     gate.refund(account, charged.window_start, 5)
         .await
         .expect("an over-large refund still succeeds");
-    let after_over_refund = window_usage(test.database.pool(), account, charged.window_start)
-        .await
-        .expect("the usage query succeeds again");
+    let after_over_refund = window_usage(
+        test.database.pool(),
+        account,
+        BudgetClass::Read.as_str(),
+        charged.window_start,
+    )
+    .await
+    .expect("the usage query succeeds again");
 
     test.cleanup().await.expect("cleanup drops the database");
 

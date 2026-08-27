@@ -10,32 +10,32 @@ use crate::error::PersistenceError;
 
 /// Creates the account's window row when absent, leaving any existing row alone.
 const ENSURE_WINDOW: &str = "insert into x_archive.api_budget_windows \
-     (account_id, window_start, window_seconds, request_cap, used_requests) \
-     values ($1, $2, $3, $4, 0) \
-     on conflict (account_id, window_start) do nothing";
+     (account_id, budget_class, window_start, window_seconds, request_cap, used_requests) \
+     values ($1, $2, $3, $4, $5, 0) \
+     on conflict (account_id, budget_class, window_start) do nothing";
 
 /// Reads back the usage of the row the transaction just targeted, holding the
 /// row's lock so concurrent charges serialize behind it.
 const READ_USAGE: &str = "select used_requests \
      from x_archive.api_budget_windows \
-     where account_id = $1 and window_start = $2 \
+     where account_id = $1 and budget_class = $2 and window_start = $3 \
      for update";
 
 /// Adds the reserved cost to the persisted usage.
 const BUMP_USAGE: &str = "update x_archive.api_budget_windows \
-     set used_requests = used_requests + $3 \
-     where account_id = $1 and window_start = $2";
+     set used_requests = used_requests + $4 \
+     where account_id = $1 and budget_class = $2 and window_start = $3";
 
 /// Releases refunded cost from the persisted usage, clamping at zero in the same
 /// atomic statement.
 const REFUND_USAGE: &str = "update x_archive.api_budget_windows \
-     set used_requests = greatest(used_requests - $3, 0) \
-     where account_id = $1 and window_start = $2";
+     set used_requests = greatest(used_requests - $4, 0) \
+     where account_id = $1 and budget_class = $2 and window_start = $3";
 
 /// Reads one account's window usage without taking any lock.
 const PEEK_USAGE: &str = "select used_requests \
      from x_archive.api_budget_windows \
-     where account_id = $1 and window_start = $2";
+     where account_id = $1 and budget_class = $2 and window_start = $3";
 
 /// The outcome of one reservation attempt against a window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +59,7 @@ pub enum WindowCharge {
 pub async fn charge(
     pool: &sqlx::PgPool,
     account_id: Uuid,
+    budget_class: &str,
     window_start: DateTime<Utc>,
     window_seconds: i64,
     request_cap: i64,
@@ -67,6 +68,7 @@ pub async fn charge(
     let mut transaction = pool.begin().await.map_err(PersistenceError::Query)?;
     sqlx::query(ENSURE_WINDOW)
         .bind(account_id)
+        .bind(budget_class)
         .bind(window_start)
         .bind(window_seconds)
         .bind(request_cap)
@@ -75,6 +77,7 @@ pub async fn charge(
         .map_err(PersistenceError::Query)?;
     let used_requests: i32 = sqlx::query_scalar(READ_USAGE)
         .bind(account_id)
+        .bind(budget_class)
         .bind(window_start)
         .fetch_one(&mut *transaction)
         .await
@@ -88,6 +91,7 @@ pub async fn charge(
     }
     sqlx::query(BUMP_USAGE)
         .bind(account_id)
+        .bind(budget_class)
         .bind(window_start)
         .bind(cost)
         .execute(&mut *transaction)
@@ -109,11 +113,13 @@ pub async fn charge(
 pub async fn refund(
     pool: &sqlx::PgPool,
     account_id: Uuid,
+    budget_class: &str,
     window_start: DateTime<Utc>,
     cost: i64,
 ) -> Result<(), PersistenceError> {
     sqlx::query(REFUND_USAGE)
         .bind(account_id)
+        .bind(budget_class)
         .bind(window_start)
         .bind(cost)
         .execute(pool)
@@ -130,10 +136,12 @@ pub async fn refund(
 pub async fn window_usage(
     pool: &sqlx::PgPool,
     account_id: Uuid,
+    budget_class: &str,
     window_start: DateTime<Utc>,
 ) -> Result<Option<i32>, PersistenceError> {
     sqlx::query_scalar(PEEK_USAGE)
         .bind(account_id)
+        .bind(budget_class)
         .bind(window_start)
         .fetch_optional(pool)
         .await

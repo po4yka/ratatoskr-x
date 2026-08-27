@@ -84,6 +84,8 @@ async fn intent_round_trips_through_digest_lookup() {
     ];
     let intent = NewIntent {
         internal_user_id: uuid::Uuid::from_u128(0x4242),
+        account_id: None,
+        purpose: "read_connection",
         state_hash: "9408fb980ecb806c67bd33721112861ef1c14736ffd1a0b12842ff9f98b46749",
         code_verifier_encrypted: b"sealed-verifier-bytes",
         nonce: "nonce-observation",
@@ -111,6 +113,8 @@ async fn intent_round_trips_through_digest_lookup() {
         row.internal_user_id, intent.internal_user_id,
         "the internal-user binding survives"
     );
+    assert_eq!(row.account_id, intent.account_id);
+    assert_eq!(row.purpose, intent.purpose);
     assert_eq!(
         row.code_verifier_encrypted, intent.code_verifier_encrypted,
         "the sealed verifier bytes survive"

@@ -10,6 +10,7 @@ use crate::callback::AcceptedCallback;
 use crate::cipher::{Purpose, TokenCipher};
 use crate::clock::Clock;
 use crate::error::FlowError;
+use crate::intent::IntentPurpose;
 use crate::payload::CredentialPayload;
 use crate::scope;
 use crate::token_client::TokenClient;
@@ -117,6 +118,96 @@ impl ConnectionService {
             .await
             .map_err(Self::persistence)?;
         Ok(())
+    }
+
+    /// Exchanges an accepted bookmark-write extension for its account-bound credential.
+    ///
+    /// # Errors
+    /// When the accepted callback is not a bookmark-write intent, or when the delegated
+    /// provider exchange fails.
+    pub async fn exchange_bookmark_write_code(
+        &self,
+        accepted: &AcceptedCallback,
+        code: &str,
+    ) -> Result<(), FlowError> {
+        let IntentPurpose::BookmarkWrite { account_id } = accepted.purpose else {
+            return Err(FlowError::Configuration);
+        };
+        let mut required_scopes = self.oauth.read_scopes.clone();
+        if !required_scopes
+            .iter()
+            .any(|scope| scope == "bookmark.write")
+        {
+            required_scopes.push("bookmark.write".to_owned());
+        }
+        if accepted.requested_scopes != required_scopes {
+            return Err(FlowError::Configuration);
+        }
+        let redirect_uri = self
+            .oauth
+            .redirect_uri
+            .clone()
+            .filter(|uri| !uri.is_empty())
+            .ok_or(FlowError::Configuration)?;
+        let tokens = self
+            .client
+            .exchange_code(code, &redirect_uri, &accepted.code_verifier)
+            .await?;
+        let granted = observed_grant(tokens.scope.as_deref(), &required_scopes);
+        let missing = scope::missing_scopes(&required_scopes, &granted);
+        if !missing.is_empty() {
+            x_persistence::credentials::insert_rejected_write_grant(
+                &self.db,
+                account_id,
+                &granted,
+                "scope_downgrade",
+            )
+            .await
+            .map_err(Self::persistence)?;
+            return Err(FlowError::Downgrade {
+                missing_scopes: missing,
+            });
+        }
+        let provider_user_id = self
+            .client
+            .authenticated_user_id(&tokens.access_token)
+            .await?;
+        let payload = CredentialPayload {
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+        };
+        let sealed = self
+            .cipher
+            .seal(account_id, Purpose::Credential, &payload.encode());
+        let now = self.clock.now();
+        let expires_at = now + std::time::Duration::from_secs(tokens.expires_in);
+        let activation = x_persistence::bookmark_write_authorizations::WriteGrantActivation {
+            oauth_intent_id: accepted.intent_id,
+            account_id,
+            internal_user_id: accepted.internal_user_id,
+            provider_user_id: &provider_user_id,
+            encrypted_payload: &sealed,
+            granted_scopes: &granted,
+            expires_at: Some(expires_at),
+            authorized_at: now,
+        };
+        match x_persistence::bookmark_write_authorizations::activate(&self.db, &activation)
+            .await
+            .map_err(Self::persistence)?
+        {
+            x_persistence::bookmark_write_authorizations::ActivationOutcome::Activated => Ok(()),
+            x_persistence::bookmark_write_authorizations::ActivationOutcome::BindingMismatch => {
+                x_persistence::credentials::insert_rejected_write_grant(
+                    &self.db,
+                    account_id,
+                    &granted,
+                    "provider_identity_mismatch",
+                )
+                .await
+                .map_err(Self::persistence)?;
+                Err(FlowError::ProviderIdentityMismatch)
+            }
+        }
     }
 
     /// Refreshes the account's credential, classifying rotation, reuse, staleness,

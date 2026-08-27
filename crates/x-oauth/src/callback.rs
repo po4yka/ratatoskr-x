@@ -10,6 +10,7 @@ use x_persistence::oauth_intents::{self, ConsumeOutcome};
 use crate::cipher::{Purpose, TokenCipher};
 use crate::clock::Clock;
 use crate::error::{CipherError, FlowError};
+use crate::intent::IntentPurpose;
 
 /// What became of one presented callback state.
 #[derive(Debug)]
@@ -27,8 +28,14 @@ pub enum CallbackResolution {
 /// The binding and verifier exposed by exactly one acceptance.
 #[derive(Debug, Clone)]
 pub struct AcceptedCallback {
+    /// The persisted single-use intent whose binding was accepted.
+    pub intent_id: uuid::Uuid,
     /// The internal user the accepted intent belongs to.
     pub internal_user_id: uuid::Uuid,
+    /// The authorization purpose and any existing-account binding.
+    pub purpose: IntentPurpose,
+    /// The exact provider scopes requested by the accepted intent.
+    pub requested_scopes: Vec<String>,
     /// The decrypted PKCE verifier proving possession of the challenge.
     pub code_verifier: String,
 }
@@ -77,8 +84,16 @@ pub async fn resolve_callback(
             &intent.code_verifier_encrypted,
         )
         .map_err(FlowError::Cipher)?;
+    let purpose = match (intent.purpose.as_str(), intent.account_id) {
+        ("read_connection", None) => IntentPurpose::ReadConnection,
+        ("bookmark_write", Some(account_id)) => IntentPurpose::BookmarkWrite { account_id },
+        _ => return Err(FlowError::Configuration),
+    };
     Ok(CallbackResolution::Accepted(AcceptedCallback {
+        intent_id: intent.id,
         internal_user_id: intent.internal_user_id,
+        purpose,
+        requested_scopes: intent.requested_scopes,
         code_verifier: String::from_utf8(verifier_bytes)
             .map_err(|_| FlowError::Cipher(CipherError::Auth))?,
     }))

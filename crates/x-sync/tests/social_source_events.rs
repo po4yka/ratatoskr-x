@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use ratatoskr_event_envelope::EventPayload;
 use ratatoskr_social_contracts::SocialSourceCaptured;
-use x_budget::gate::{BudgetGate, Clock};
+use x_budget::gate::{BudgetClass, BudgetGate, Clock};
 use x_persistence::test_support::TestDatabase;
 use x_sync::{BookmarkPage, BookmarkPageSource, BookmarkSnapshotService, BookmarkSourceError};
 
@@ -62,8 +62,14 @@ fn service(database: x_persistence::database::Database) -> BookmarkSnapshotServi
         .parse()
         .expect("the fixture instant parses");
     let clock: Arc<dyn Clock> = Arc::new(FakeClock { instant });
-    let budget = BudgetGate::with_clock(database.clone(), 10, 3_600, Arc::clone(&clock))
-        .expect("the budget gate accepts the fixture configuration");
+    let budget = BudgetGate::with_clock(
+        database.clone(),
+        BudgetClass::Read,
+        10,
+        3_600,
+        Arc::clone(&clock),
+    )
+    .expect("the budget gate accepts the fixture configuration");
     BookmarkSnapshotService::new(database, budget, clock)
 }
 

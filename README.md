@@ -2,7 +2,7 @@
 
 `ratatoskr-x` is the X account and bookmark archive bounded context for Ratatoskr. It authenticates a user through the official X OAuth flow, synchronizes bookmarks and bookmark folders, preserves normalized post content and media metadata, and publishes authoritative social-source events for indexing and analysis.
 
-> **Status:** the service scaffold, official OAuth connection, post normalization, complete and frequent bookmark scans, native-folder authority, explicit browser-capture command consumer, normalized social-source and linked-article outbox facts, Knowledge completion linkage, and the due-driven compliance/takedown application service are implemented. Knowledge owns analysis, embeddings, and search documents; X stores only exact `(social_source_id, content_digest)` completion linkage. Knowledge completion/removal transport and timed compliance invocation are not wired into the runtime, so they are not live deployment claims. An official provider adapter for compliance classification, write-back, and legacy import remain unimplemented.
+> **Status:** the service scaffold, official OAuth connection, bookmark add/remove write-back library service and official HTTP adapter, post normalization, complete and frequent bookmark scans, native-folder authority, explicit browser-capture command consumer, normalized social-source and linked-article outbox facts, Knowledge completion linkage, and the due-driven compliance/takedown application service are implemented. Knowledge owns analysis, embeddings, and search documents; X stores only exact `(social_source_id, content_digest)` completion linkage. No external HTTP/message/UI surface invokes write-back yet; Knowledge completion/removal transport, timed compliance invocation, the compliance adapter, and legacy import are also not wired, so none is a live deployment claim.
 
 > [!IMPORTANT]
 > **Ratatoskr is in development.** No database holds data that has to survive a schema change.
@@ -56,6 +56,11 @@ The service owns the `x_archive.*` PostgreSQL schema defined in [`schema.sql`](s
 ```text
 accounts
 credentials
+oauth_intents
+bookmark_write_authorizations
+bookmark_write_consents
+bookmark_write_operations
+bookmark_write_audit_events
 users
 posts
 post_relations
@@ -197,17 +202,25 @@ does not assert an unconditional right to retain those bytes.
 
 ## Write-back
 
-Optional write-back operations include adding and removing bookmarks. Requirements:
+The callable write-back service and official adapter support only adding and removing bookmarks for
+the connected account. Each live action requires a separately activated `bookmark.write` grant and
+one immutable, expiring consent bound to owner, account, action, target, approval time, and trusted
+surface. The request also carries an account-scoped idempotency key whose raw value is never stored.
 
-- separate write consent;
-- authenticated user principal;
-- idempotency key;
-- explicit target post;
-- audit record;
-- provider response classification;
-- no implicit write caused by viewing or importing a URL.
+Execution reserves only the hard `bookmark_write` budget class immediately before provider contact.
+Dry run reuses the local admission evaluator but does not consume consent, charge budget, contact X,
+or change bookmark state. Confirmed writes update a known bookmark projection with distinct write
+observation evidence; an unknown post remains `projection_pending`. Ambiguous provider outcomes are
+durably `uncertain`, never retried blindly, and only a complete successful snapshot may reconcile
+them. The append-only audit history records every reached gate, provider, projection, replay, and
+terminal stage without tokens, raw bodies, authorization headers, or post content.
 
-Native folder mutations are added only if the official API and granted scopes support the required operation at implementation time.
+Capability boundary:
+
+- no posting, liking, reposting, folder mutation, bulk mutation, or source-content-triggered write;
+- no external runtime/API/UI caller is included in this repository-local change;
+- a later cross-repository change must define that authenticated consent-recording surface before
+  users can exercise the capability outside Rust callers/tests.
 
 ## Compliance and upstream availability
 

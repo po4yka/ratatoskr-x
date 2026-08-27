@@ -27,6 +27,27 @@ impl Clock for SystemClock {
     }
 }
 
+/// The closed provider-operation class whose durable allowance a gate owns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BudgetClass {
+    /// Provider reads performed by synchronization and capture workflows.
+    Read,
+    /// Explicitly consented bookmark add and remove operations.
+    BookmarkWrite,
+}
+
+impl BudgetClass {
+    /// Returns the stable value stored in the owned budget table.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::BookmarkWrite => "bookmark_write",
+        }
+    }
+}
+
 /// Why a reservation was not granted.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -67,10 +88,20 @@ pub struct Reservation {
     pub cost: u32,
 }
 
+/// A non-consuming observation of whether one cost currently fits a gate's window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BudgetInspection {
+    /// Whether the requested cost currently fits the gate's class-bound allowance.
+    pub eligible: bool,
+    /// The instant at which the inspected window ends.
+    pub reset_at: DateTime<Utc>,
+}
+
 /// Gates provider calls behind durable per-account request windows.
 #[derive(Clone)]
 pub struct BudgetGate {
     database: Database,
+    budget_class: BudgetClass,
     request_cap_per_window: u32,
     window_seconds: i32,
     reset_offset: TimeDelta,
@@ -80,6 +111,7 @@ pub struct BudgetGate {
 impl std::fmt::Debug for BudgetGate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BudgetGate")
+            .field("budget_class", &self.budget_class)
             .field("request_cap_per_window", &self.request_cap_per_window)
             .field("window_seconds", &self.window_seconds)
             .finish_non_exhaustive()
@@ -96,11 +128,13 @@ impl BudgetGate {
     /// owned schema's integer column.
     pub fn new(
         database: Database,
+        budget_class: BudgetClass,
         request_cap_per_window: u32,
         window_seconds: i64,
     ) -> Result<Self, BudgetError> {
         Self::with_clock(
             database,
+            budget_class,
             request_cap_per_window,
             window_seconds,
             Arc::new(SystemClock),
@@ -114,6 +148,7 @@ impl BudgetGate {
     /// Same conditions as [`BudgetGate::new`].
     pub fn with_clock(
         database: Database,
+        budget_class: BudgetClass,
         request_cap_per_window: u32,
         window_seconds: i64,
         clock: Arc<dyn Clock>,
@@ -129,6 +164,7 @@ impl BudgetGate {
             })?;
         Ok(Self {
             database,
+            budget_class,
             request_cap_per_window,
             window_seconds: i32::try_from(window_seconds).unwrap_or(i32::MAX),
             reset_offset,
@@ -159,6 +195,7 @@ impl BudgetGate {
         match budget_windows::charge(
             self.database.pool(),
             account,
+            self.budget_class.as_str(),
             window_start,
             i64::from(self.window_seconds),
             i64::from(self.request_cap_per_window),
@@ -175,6 +212,34 @@ impl BudgetGate {
                 )?,
             }),
         }
+    }
+
+    /// Inspects whether `cost` would fit for `account` without reserving it.
+    ///
+    /// # Errors
+    /// [`BudgetError::Persistence`] when the durable usage cannot be inspected.
+    pub async fn inspect(
+        &self,
+        account: uuid::Uuid,
+        cost: u32,
+    ) -> Result<BudgetInspection, BudgetError> {
+        let window_start = window_start_for(self.clock.now(), i64::from(self.window_seconds));
+        let reset_at = window_start.checked_add_signed(self.reset_offset).ok_or(
+            BudgetError::InvalidConfiguration {
+                reason: "window_seconds is too large for the window's reset instant",
+            },
+        )?;
+        let used = budget_windows::window_usage(
+            self.database.pool(),
+            account,
+            self.budget_class.as_str(),
+            window_start,
+        )
+        .await?
+        .unwrap_or_default();
+        let eligible = cost <= self.request_cap_per_window
+            && i64::from(used) + i64::from(cost) <= i64::from(self.request_cap_per_window);
+        Ok(BudgetInspection { eligible, reset_at })
     }
 
     /// Releases cost previously charged by a reservation whose provider call failed.
@@ -194,6 +259,7 @@ impl BudgetGate {
         budget_windows::refund(
             self.database.pool(),
             account,
+            self.budget_class.as_str(),
             window_start,
             i64::from(bounded_cost),
         )

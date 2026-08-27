@@ -5,6 +5,10 @@
 - `accounts`, encrypted `credentials`, scopes, expiry/status, budgets/limits.
 - `posts`, authors, relations, media, URL entities, raw revision blob references.
 - `bookmarks`, observations, current state, full snapshots/pages/checkpoints.
+- `bookmark_write_authorizations`, separately activated current write-scope evidence.
+- immutable `bookmark_write_consents`, account-scoped `bookmark_write_operations`, and append-only
+  `bookmark_write_audit_events`; raw idempotency keys, credentials, provider bodies, and post text
+  are excluded.
 - `bookmark_folders`, memberships, folder snapshots.
 - `social_sources` and append-only `social_source_revisions`; the current digest is a projection,
   while every retained digest remains eligible for an exact Knowledge completion link.
@@ -33,3 +37,14 @@ the one tombstone tied to the authorizing ledger row, and adds one `social.sourc
 fact. The tombstone retains the X-specific reason; the shared event says only why Ratatoskr removed
 the library item. Development status still forbids migrations, so all definitions live in the one
 current `schema.sql`.
+
+## Bookmark write evidence
+
+One consent is bound to exactly one owner/account/add-or-remove/target/surface and can be consumed by
+at most one live operation. Operations store only SHA-256 idempotency identity, a closed state and
+outcome, bounded provider request/rate evidence, and projection observation references. Confirmed
+known-target writes use `last_write_operation_id`, `last_write_observed_at`, or
+`observed_removed_write_operation_id`; these fields are observations and do not claim a native X
+save/removal timestamp. Unknown confirmed targets remain `projection_pending` without fabricated
+post rows. `uncertain` operations advance only from complete-snapshot evidence; partial scans never
+have that authority.

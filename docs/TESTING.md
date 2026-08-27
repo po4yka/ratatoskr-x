@@ -8,6 +8,9 @@ Required tests:
 - Folder listing/membership reconciliation.
 - Honest observation timestamps.
 - Idempotent add/remove mutations and partial provider failures.
+- Separate OAuth/per-action consent gates, exact/concurrent retry convergence, dry-run fidelity,
+  isolated write budgets, bounded no-retry provider classification, confirmed/unknown projection,
+  uncertain complete-snapshot reconciliation, and complete secret-free audit reconstruction.
 - Rate-limit/credit budget, retry-after, reauthorization, deleted/protected/suspended states.
 - SQL schema initialization, outbox/inbox replay, authorization, and no-content logging.
 - Concurrent SocialSource request deduplication and exact current/historical Knowledge completion
@@ -22,6 +25,10 @@ Default tests use synthetic/WireMock fixtures; optional sandbox tests use a dedi
 Compliance integration tests use a classified fake behind the official-provider seam. They prove
 selection, persistence, and takedown state-machine behavior; they are not evidence that an HTTP
 provider adapter, scheduler, message broker, or live personal X account has been exercised.
+
+Bookmark write-back integration tests use PostgreSQL plus synthetic providers and WireMock. The
+request-shape tests exercise the concrete Rustls/Reqwest adapter with marker credentials; they are
+not a live personal-account mutation or proof that an external runtime/UI can invoke the service.
 
 ## Test-first
 

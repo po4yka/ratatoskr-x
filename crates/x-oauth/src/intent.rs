@@ -3,6 +3,30 @@
 use crate::error::FlowError;
 use crate::pkce;
 
+/// Why one PKCE authorization intent is being issued.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum IntentPurpose {
+    /// Establish or replace the default read-only connection.
+    ReadConnection,
+    /// Extend one existing connected account with bookmark mutation authority.
+    BookmarkWrite {
+        /// The existing X account whose grant must be extended.
+        account_id: uuid::Uuid,
+    },
+}
+
+impl IntentPurpose {
+    /// Returns the durable purpose token and optional existing-account binding.
+    #[must_use]
+    pub const fn persistence_binding(self) -> (&'static str, Option<uuid::Uuid>) {
+        match self {
+            Self::ReadConnection => ("read_connection", None),
+            Self::BookmarkWrite { account_id } => ("bookmark_write", Some(account_id)),
+        }
+    }
+}
+
 /// One freshly issued authorization intent, ready to be persisted and shown.
 #[derive(Debug, Clone)]
 pub struct AuthorizationIntent {
@@ -52,6 +76,7 @@ pub(crate) fn form_urlencode(value: &str) -> String {
 pub fn authorization_url(
     oauth: &x_core::config::OauthConfig,
     intent: &AuthorizationIntent,
+    purpose: IntentPurpose,
 ) -> Result<String, FlowError> {
     let Some(client_id) = oauth.client_id.as_deref().filter(|id| !id.is_empty()) else {
         return Err(FlowError::Configuration);
@@ -59,7 +84,13 @@ pub fn authorization_url(
     let Some(redirect_uri) = oauth.redirect_uri.as_deref().filter(|uri| !uri.is_empty()) else {
         return Err(FlowError::Configuration);
     };
-    let scopes = oauth.read_scopes.join(" ");
+    let mut scopes = oauth.read_scopes.clone();
+    if matches!(purpose, IntentPurpose::BookmarkWrite { .. })
+        && !scopes.iter().any(|scope| scope == "bookmark.write")
+    {
+        scopes.push("bookmark.write".to_owned());
+    }
+    let scopes = scopes.join(" ");
     Ok(format!(
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
         oauth.authorize_url,

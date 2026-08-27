@@ -50,6 +50,9 @@ pub enum FlowError {
         /// Every requested read scope the grant omitted.
         missing_scopes: Vec<String>,
     },
+    /// The authenticated provider identity does not belong to the account bound to the intent.
+    #[error("the authenticated provider identity does not match the bound account")]
+    ProviderIdentityMismatch,
     /// The callback state matched no persisted intent.
     #[error("the callback state does not match any intent")]
     UnknownCallbackState,
