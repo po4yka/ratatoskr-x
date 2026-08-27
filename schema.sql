@@ -304,15 +304,6 @@ CREATE TABLE IF NOT EXISTS x_archive.rate_limit_state (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS x_archive.tombstones (
-    id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    post_provider_id     text NOT NULL,
-    reason               text NOT NULL
-        CHECK (reason IN ('deleted', 'protected', 'author_suspended', 'unavailable', 'unknown')),
-    evidence_snapshot_id uuid REFERENCES x_archive.snapshots (id),
-    recorded_at          timestamptz NOT NULL DEFAULT now()
-);
-
 -- A social source is an account-library record, rather than a global X post
 -- attribute: one provider post may be captured by several Ratatoskr owners.
 CREATE TABLE IF NOT EXISTS x_archive.social_sources (
@@ -325,9 +316,13 @@ CREATE TABLE IF NOT EXISTS x_archive.social_sources (
     saved_authority       text NOT NULL CHECK (saved_authority IN ('authoritative_platform_state',
                                                                      'explicit_user_capture')),
     captured_at           timestamptz NOT NULL,
+    removed_at            timestamptz,
+    removal_reason        text CHECK (removal_reason IN ('retention_policy')),
     created_at            timestamptz NOT NULL DEFAULT now(),
     updated_at            timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (account_id, post_id)
+    UNIQUE (account_id, post_id),
+    UNIQUE (account_id, social_source_id),
+    CHECK ((removed_at IS NULL) = (removal_reason IS NULL))
 );
 
 -- Retained source revisions are the durable basis for idempotent captured and
@@ -343,6 +338,61 @@ CREATE TABLE IF NOT EXISTS x_archive.social_source_revisions (
                                                                 'explicit_user_capture')),
     created_at        timestamptz NOT NULL DEFAULT now(),
     UNIQUE (social_source_id, content_digest)
+);
+
+-- Knowledge owns analysis bodies, embeddings, and search documents. X retains only the
+-- privacy-safe completion linkage published by the shared social analysis contract.
+CREATE TABLE IF NOT EXISTS x_archive.knowledge_analysis_links (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    inbox_event_id    text NOT NULL UNIQUE,
+    social_source_id  uuid NOT NULL,
+    content_digest    jsonb NOT NULL,
+    completed_at      timestamptz NOT NULL,
+    received_at       timestamptz NOT NULL DEFAULT now(),
+    FOREIGN KEY (social_source_id, content_digest)
+        REFERENCES x_archive.social_source_revisions (social_source_id, content_digest),
+    UNIQUE (social_source_id, content_digest),
+    CHECK (jsonb_typeof(content_digest) = 'object')
+);
+
+-- Append-only non-sensitive evidence for official-provider compliance checks. An indeterminate
+-- result deliberately has no absence or takedown authority.
+CREATE TABLE IF NOT EXISTS x_archive.compliance_revalidation_ledger (
+    id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id          uuid NOT NULL,
+    post_id             uuid NOT NULL REFERENCES x_archive.posts (id),
+    social_source_id    uuid NOT NULL,
+    provider_request_id text,
+    outcome             text NOT NULL
+        CHECK (outcome IN ('available', 'deleted', 'protected', 'author_suspended',
+                           'unavailable', 'indeterminate')),
+    failure_class       text
+        CHECK (failure_class IN ('rate_limited', 'authorization_lost', 'provider_failure',
+                                 'invalid_evidence')),
+    checked_at          timestamptz NOT NULL,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    FOREIGN KEY (account_id, social_source_id)
+        REFERENCES x_archive.social_sources (account_id, social_source_id),
+    CHECK ((outcome = 'indeterminate') = (failure_class IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS compliance_revalidation_due_idx
+    ON x_archive.compliance_revalidation_ledger (account_id, social_source_id, checked_at DESC);
+
+-- One account-source takedown points to the authoritative provider observation that caused it.
+-- Provider content and credentials do not belong in this row.
+CREATE TABLE IF NOT EXISTS x_archive.tombstones (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id        uuid NOT NULL,
+    social_source_id  uuid NOT NULL UNIQUE,
+    post_provider_id  text NOT NULL,
+    reason            text NOT NULL
+        CHECK (reason IN ('deleted', 'protected', 'author_suspended', 'unavailable')),
+    revalidation_id   uuid NOT NULL UNIQUE
+        REFERENCES x_archive.compliance_revalidation_ledger (id),
+    recorded_at       timestamptz NOT NULL,
+    FOREIGN KEY (account_id, social_source_id)
+        REFERENCES x_archive.social_sources (account_id, social_source_id)
 );
 
 -- X owns the request and result linkage for an external article, while the

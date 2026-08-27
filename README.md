@@ -2,7 +2,7 @@
 
 `ratatoskr-x` is the X account and bookmark archive bounded context for Ratatoskr. It authenticates a user through the official X OAuth flow, synchronizes bookmarks and bookmark folders, preserves normalized post content and media metadata, and publishes authoritative social-source events for indexing and analysis.
 
-> **Status:** the service scaffold, the official OAuth connection, post normalization, complete bookmark snapshots, and safe frequent partial bookmark scans are implemented — a Rust workspace with typed configuration, structured telemetry, process-state endpoints (`/health/live`, `/health/ready`, `/metrics`, `/version`), the first-version `x_archive` schema, OAuth 2.0 Authorization Code with PKCE (one-time intents, callback validation, AES-256-GCM encrypted credentials, rotation-aware refresh with reuse detection, revocation, minimized read scopes with downgrade refusal), durable per-account API budget gates, pure normalization of official API payloads into author, post, relation, and media-metadata records with parser-version stamping, budget-bounded full snapshots with durable opaque checkpoints, atomic authority swaps, and observed removals, plus bounded head scans that advance watermarks only after reaching their prior watermark, escalate gaps to a required full snapshot, and leave idempotent drift-repair evidence during full reconciliation. An official API HTTP adapter, folders, write-back, and legacy import are planned below and not implemented yet.
+> **Status:** the service scaffold, official OAuth connection, post normalization, complete and frequent bookmark scans, native-folder authority, normalized social-source and linked-article outbox facts, Knowledge completion linkage, and the due-driven compliance/takedown application service are implemented. Knowledge owns analysis, embeddings, and search documents; X stores only exact `(social_source_id, content_digest)` completion linkage. The repository still has no broker runtime or periodic scheduler, so outbox/inbox delivery and timed compliance invocation are not live deployment claims. An official provider adapter for compliance classification, write-back, and legacy import remain unimplemented.
 
 > [!IMPORTANT]
 > **Ratatoskr is in development.** No database holds data that has to survive a schema change.
@@ -49,24 +49,28 @@ Credentials remain inside this service:
 - token values never appear in events, logs, traces, or public responses;
 - Platform, Telegram, Knowledge, and clients receive no plaintext X credential.
 
-## Planned data model
+## Owned data model
 
 The service owns the `x_archive.*` PostgreSQL schema defined in [`schema.sql`](schema.sql), applied in place with no migrations while development status forbids them. The first-version tables:
 
 ```text
-x_accounts
-x_credentials
-x_users
-x_posts
-x_post_relations
-x_media
-x_bookmarks
-x_bookmark_folders
-x_bookmark_folder_items
-x_sync_runs
-x_snapshots
-x_rate_limit_state
-x_tombstones
+accounts
+credentials
+users
+posts
+post_relations
+media
+bookmarks
+bookmark_folders
+bookmark_folder_items
+sync_runs
+snapshots
+rate_limit_state
+social_sources
+social_source_revisions
+knowledge_analysis_links
+compliance_revalidation_ledger
+tombstones
 outbox_events
 inbox_events
 ```
@@ -164,6 +168,31 @@ X post
 ```
 
 Knowledge may produce a composite analysis that explicitly separates the post's claims from the article's content and preserves provenance for both.
+
+`social.source.captured.v1` and `social.source.updated.v1` are the agreed Knowledge analysis
+requests. X deduplicates them by source revision, accepts
+`knowledge.analysis.completed.v1`, and links the result to that exact retained digest. Search
+documents remain Knowledge-owned; X does not persist Knowledge-private analysis or search IDs.
+
+## Compliance revalidation
+
+`ComplianceRevalidationService` is a bounded, due-driven application seam. For each unremoved
+account source whose last ledger entry predates the caller's due instant, it reserves one unit from
+the existing provider-request budget and asks an official-provider adapter for a closed availability
+classification. Every attempted check appends non-sensitive evidence to
+`compliance_revalidation_ledger`; ambiguous, failed, scope-lost, and rate-limited checks are
+`indeterminate` and have no takedown authority.
+
+An authoritative deleted, protected, suspended-author, or unavailable result atomically updates
+provider availability, marks the account source removed, records one source tombstone, and enqueues
+the shared `social.source.removed.v1` fact with `reason = retention_policy`. Knowledge consumes that
+fact to delete or tombstone its analysis, embedding, and search projection. Normal source
+observations and delayed Knowledge completions cannot reactivate a removed source.
+
+The future runtime scheduler must call this service periodically, and the outbox/inbox transport
+must deliver the facts. Neither runtime facility exists in this bootstrap repository yet. Retention
+of normalized or raw provider bytes remains governed by separate provider/legal policy; a tombstone
+does not assert an unconditional right to retain those bytes.
 
 ## Write-back
 
@@ -298,10 +327,12 @@ Every sync run records mode, pages, cursors, request budget, completeness, warni
 3. Implement read-only bookmark pagination and post normalization. *(normalization done)*
 4. Add periodic complete snapshots and removal reconciliation.
 5. Add native folder synchronization.
-6. Publish normalized social-source events.
-7. Delegate linked articles to Extractor and integrate with Knowledge.
-8. Import Field Theory data and run shadow comparison.
-9. Add compliance revalidation, rate-limit diagnostics, and optional write-back.
+6. Publish normalized social-source events. *(done)*
+7. Delegate linked articles to Extractor. *(durable request/result linkage done)*
+8. Integrate Knowledge analysis linkage and compliance revalidation. *(application services done;
+   runtime scheduling/transport pending)*
+9. Add separately consented idempotent bookmark write-back.
+10. Import Field Theory data and run shadow comparison.
 
 ## Workspace integration
 
@@ -309,4 +340,8 @@ Planned: `ratatoskr-workspace` will pin this service with compatible social cont
 
 ## Project status
 
-The first three vertical slices from `docs/IMPLEMENTATION_PLAN.md` are in place: the workspace builds under a pinned toolchain, the gate runs fmt/clippy/tests/deny beside the OpenSpec checks (see `DEVELOPMENT.md`), `schema.sql` defines the owned database shape, the official OAuth 2.0 PKCE connection — encrypted credential envelopes, rotation with reuse detection, revocation, scope auditing, and per-account budget gates — is implemented and tested against recorded provider fixtures, and pure normalization (`crates/x-normalize`) maps official API payload envelopes into author, post, relation, and media-metadata records under an explicit record-and-preserve unknown-field policy with a parser-version stamp on every record. Everything that still talks to X beyond the token endpoints — bookmark synchronization, events, compliance revalidation, and legacy migration — remains unimplemented.
+Plan items 1–8 in `docs/IMPLEMENTATION_PLAN.md` now have durable application behavior and tests.
+For item 8, this means revision-deduplicated SocialSource requests, exact Knowledge completion
+linkage, the revalidation ledger, and replay-safe takedown outbox state. It does not mean live
+periodic execution or broker delivery: those require the future runtime scheduler, transport, and
+official-provider compliance adapter. Write-back and legacy migration remain planned.

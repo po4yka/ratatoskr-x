@@ -1,13 +1,20 @@
 //! Complete bookmark snapshots with durable checkpoints and atomic authority.
 
 mod articles;
+mod compliance;
 mod explicit_capture;
 mod folders;
 mod incremental;
+mod knowledge;
 mod social_sources;
 
 pub use articles::{
     ArticleCaptureError, ArticleCaptureService, SelectedArticleUrl, select_external_expanded_urls,
+};
+pub use compliance::{
+    ComplianceAvailability, ComplianceObservation, ComplianceRevalidationError,
+    ComplianceRevalidationService, ComplianceRevalidationSource, ComplianceRunSummary,
+    ComplianceSourceError,
 };
 pub use explicit_capture::{ExplicitCaptureError, ExplicitCaptureService};
 
@@ -17,6 +24,9 @@ pub use folders::{
 };
 pub use incremental::{
     IncrementalOutcome, IncrementalScanService, SCHEDULED_BOOKMARK_SCAN_COMMAND, ScheduledScan,
+};
+pub use knowledge::{
+    KnowledgeAnalysisAdmission, KnowledgeAnalysisService, KnowledgeIntegrationError,
 };
 
 use std::collections::HashMap;

@@ -30,6 +30,7 @@ type SourceRow = (
     Uuid,
     Option<Uuid>,
     Option<String>,
+    Option<DateTime<Utc>>,
     String,
     String,
     Option<String>,
@@ -89,9 +90,16 @@ async fn publish_source(
     captured_at: DateTime<Utc>,
     provenance: SourceProvenance,
 ) -> Result<(), SnapshotError> {
+    sqlx::query("select pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("social_source:{account_id}:{post_id}"))
+        .execute(&mut **transaction)
+        .await
+        .map_err(SnapshotError::Query)?;
+
     let row: SourceRow = sqlx::query_as(
         "select account.internal_user_id, source.social_source_id, \
-         source.current_content_digest::text, post.provider_id, post.text, post.long_text, \
+         source.current_content_digest::text, source.removed_at, \
+         post.provider_id, post.text, post.long_text, \
          post.published_at, post.availability, author.provider_id, author.username, \
          author.display_name, post.expanded_urls from x_archive.accounts account \
          join x_archive.posts post on post.id = $2 \
@@ -109,6 +117,7 @@ async fn publish_source(
         internal_user_id,
         existing_source_id,
         existing_digest,
+        removed_at,
         provider_id,
         text,
         long_text,
@@ -119,6 +128,9 @@ async fn publish_source(
         author_display_name,
         expanded_urls,
     ) = row;
+    if removed_at.is_some() {
+        return Ok(());
+    }
     let expanded_urls = expanded_urls.0;
     let semantic = json!({
         "provider_id": provider_id,

@@ -377,6 +377,13 @@ expanded URL -> Extractor -> Document -> Knowledge
 
 Knowledge can create a composite analysis with separate provenance for the post and linked article.
 
+The captured and updated SocialSource facts are the agreed Knowledge analysis requests. Knowledge
+consumes them into its analysis families and search-document projection, then publishes
+`knowledge.analysis.completed.v1`. X validates the producer, owner, source, and exact retained
+content digest before atomically claiming the inbox event and recording a completion link. The link
+contains no Knowledge-private analysis, model, embedding, run, or search-document identity;
+currentness is derived by comparing its digest with the source head.
+
 ## 12. Upstream availability and compliance
 
 Provider content state may include:
@@ -391,9 +398,22 @@ access_lost
 unknown
 ```
 
-The service periodically revalidates records according to provider policy and configured retention.
+The implemented compliance application service is due-driven: a future runtime scheduler supplies
+an account, due instant, and item bound. It selects only that account's unremoved due sources,
+oldest first, and reserves the existing provider-request budget immediately before every official
+adapter call. It does not own a timer or provider HTTP parsing.
 
-A compliance/tombstone event updates active projections. Raw locally stored evidence follows the configured legal and provider-policy retention rules; it is not assumed permanently retainable without review.
+Every attempted check appends a non-sensitive ledger entry. Rate limiting, authorization loss,
+provider failure, and invalid evidence are recorded as closed `indeterminate` failure classes and
+cannot remove content. Authoritative deleted, protected, suspended-author, and unavailable results
+atomically update provider state, remove the library source, write the singleton tombstone, and
+enqueue `social.source.removed.v1` with `reason = retention_policy`. That shared fact is the
+Knowledge deletion/tombstone request for its analysis, embedding, and search-document projection;
+the X-specific upstream reason remains in the X tombstone.
+
+Ordinary observations and delayed completion events cannot reactivate a removed source. Raw locally
+stored evidence follows configured legal and provider-policy retention rules; this takedown path
+does not assert that normalized or raw provider bytes may be retained permanently.
 
 ## 13. Rate-limit and cost architecture
 

@@ -7,7 +7,8 @@
 5. Add safe frequent partial scans.
 6. Implement folder and membership snapshots.
 7. Publish normalized SocialSource and linked-article extraction events.
-8. Add Knowledge integration and compliance revalidation.
+8. Add Knowledge integration and compliance revalidation. *(implemented: durable application
+   services and contracts; runtime scheduler/provider adapter/outbox transport wiring pending)*
 9. Add separately consented idempotent bookmark write-back.
 10. Import Field Theory data, compare shadow snapshots, then cut over.
 

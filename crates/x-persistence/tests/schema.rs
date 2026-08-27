@@ -10,7 +10,7 @@
 
 use x_persistence::database::Database;
 
-/// The twenty-nine tables the owned schema must contain, no more and no fewer.
+/// The thirty-one tables the owned schema must contain, no more and no fewer.
 const OWNED_TABLES: &[&str] = &[
     "accounts",
     "api_budget_windows",
@@ -21,11 +21,13 @@ const OWNED_TABLES: &[&str] = &[
     "bookmark_reconciliation_repairs",
     "bookmark_snapshot_authority",
     "bookmarks",
+    "compliance_revalidation_ledger",
     "credentials",
     "folder_capability_limits",
     "folder_membership_observations",
     "folder_membership_snapshot_authority",
     "inbox_events",
+    "knowledge_analysis_links",
     "media",
     "oauth_intents",
     "outbox_events",
@@ -457,6 +459,61 @@ async fn social_source_and_article_capture_inventory_is_owned_and_scoped() {
     assert!(
         missing.is_empty(),
         "social source and article capture inventory must be owned and scoped; missing {missing:?}"
+    );
+}
+
+#[tokio::test]
+async fn knowledge_linkage_and_compliance_inventory_is_owned_and_scoped() {
+    let (url, name, admin) = create_disposable_database().await;
+    let database = Database::connect(&url, 2)
+        .await
+        .expect("a pooled connection");
+    database.apply_schema().await.expect("the schema applies");
+
+    let mut missing = Vec::new();
+    for table in ["knowledge_analysis_links", "compliance_revalidation_ledger"] {
+        let present = sqlx::query_scalar::<_, bool>(
+            "select count(*) > 0 from information_schema.tables \
+             where table_schema = 'x_archive' and table_name = $1",
+        )
+        .bind(table)
+        .fetch_one(database.pool())
+        .await
+        .expect("the table catalog is readable");
+        if !present {
+            missing.push(format!("table {table}"));
+        }
+    }
+    for (table, column) in [
+        ("social_sources", "removed_at"),
+        ("social_sources", "removal_reason"),
+        ("knowledge_analysis_links", "content_digest"),
+        ("compliance_revalidation_ledger", "provider_request_id"),
+        ("compliance_revalidation_ledger", "failure_class"),
+        ("tombstones", "social_source_id"),
+        ("tombstones", "revalidation_id"),
+    ] {
+        let present = sqlx::query_scalar::<_, bool>(
+            "select count(*) > 0 from information_schema.columns \
+             where table_schema = 'x_archive' and table_name = $1 and column_name = $2",
+        )
+        .bind(table)
+        .bind(column)
+        .fetch_one(database.pool())
+        .await
+        .expect("the column catalog is readable");
+        if !present {
+            missing.push(format!("{table}.{column}"));
+        }
+    }
+
+    database.pool().close().await;
+    drop_disposable_database(&name, &admin).await;
+    admin.close().await;
+
+    assert!(
+        missing.is_empty(),
+        "Knowledge linkage and compliance evidence must be source-scoped; missing {missing:?}"
     );
 }
 

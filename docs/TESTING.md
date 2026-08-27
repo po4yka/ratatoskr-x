@@ -10,9 +10,18 @@ Required tests:
 - Idempotent add/remove mutations and partial provider failures.
 - Rate-limit/credit budget, retry-after, reauthorization, deleted/protected/suspended states.
 - SQL schema initialization, outbox/inbox replay, authorization, and no-content logging.
+- Concurrent SocialSource request deduplication and exact current/historical Knowledge completion
+  linkage, including replay and removed-source rejection.
+- Compliance due/bound/account selection, one budget charge per provider call, available and
+  indeterminate ledger evidence, atomic authoritative takedown, singleton tombstone/removal event,
+  and delayed-work resurrection prevention.
 - Field Theory legacy import/shadow reconciliation.
 
 Default tests use synthetic/WireMock fixtures; optional sandbox tests use a dedicated account and explicit budget.
+
+Compliance integration tests use a classified fake behind the official-provider seam. They prove
+selection, persistence, and takedown state-machine behavior; they are not evidence that an HTTP
+provider adapter, scheduler, message broker, or live personal X account has been exercised.
 
 ## Test-first
 
