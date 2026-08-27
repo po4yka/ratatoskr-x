@@ -99,6 +99,30 @@ fn oauth_budget_and_security_sections_load_with_documented_defaults() {
 }
 
 #[test]
+fn browser_capture_bus_requires_a_private_endpoint_and_absolute_nkey_path() {
+    let valid =
+        XConfig::extract_from(&figment_with(&[])).expect("the documented bus defaults load");
+    assert_eq!(valid.bus.stream_name, "ratatoskr_commands");
+    assert_eq!(valid.bus.consumer_name, "ratatoskr_x_browser_capture");
+    assert!(valid.bus.nkey_seed_path.starts_with('/'));
+
+    let invalid = figment_with(&[
+        ("bus.url", Value::from("https://broker.example")),
+        ("bus.nkey_seed_path", Value::from("relative.nkey")),
+    ]);
+    let error = XConfig::extract_from(&invalid)
+        .expect_err("a non-NATS endpoint and relative seed path must be refused");
+    let ConfigError::Invalid { violations } = error else {
+        panic!("a semantic broker rejection must be Invalid");
+    };
+    assert_eq!(
+        violations.len(),
+        2,
+        "both unsafe broker settings are reported"
+    );
+}
+
+#[test]
 fn malformed_encryption_key_reports_violation() {
     let malformed = figment_with(&[(
         "security.token_encryption_key",

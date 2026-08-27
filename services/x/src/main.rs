@@ -28,6 +28,37 @@ async fn run() -> Result<(), BootstrapError> {
     let database = Database::connect(&config.database.url, config.database.max_connections).await?;
     database.apply_schema().await?;
 
+    let nkey_seed =
+        std::fs::read_to_string(&config.bus.nkey_seed_path).map_err(BootstrapError::NatsSeed)?;
+    let nats_client = async_nats::ConnectOptions::with_nkey(nkey_seed.trim().to_owned())
+        .connect(&config.bus.url)
+        .await
+        .map_err(|error| BootstrapError::Nats(error.to_string()))?;
+    let jetstream = async_nats::jetstream::new(nats_client.clone());
+    x_capture::ensure_browser_consumer(
+        &jetstream,
+        &config.bus.stream_name,
+        &config.bus.consumer_name,
+    )
+    .await
+    .map_err(|error| BootstrapError::Nats(error.to_string()))?;
+    let consumer_database = database.clone();
+    let consumer_stream = config.bus.stream_name.clone();
+    let consumer_name = config.bus.consumer_name.clone();
+    let consumer = tokio::spawn(async move {
+        if let Err(error) = x_capture::consume_browser_commands(
+            &jetstream,
+            &consumer_database,
+            &consumer_stream,
+            &consumer_name,
+            std::future::pending(),
+        )
+        .await
+        {
+            tracing::error!(%error, "the X browser-capture consumer stopped");
+        }
+    });
+
     let state = Arc::new(RuntimeState::new());
     state.mark_database_ready();
 
@@ -66,6 +97,9 @@ async fn run() -> Result<(), BootstrapError> {
         .with_graceful_shutdown(shutdown)
         .await
         .map_err(BootstrapError::Listener)?;
+    consumer.abort();
+    let _ = consumer.await;
+    drop(nats_client);
     guard.shutdown();
     tracing::info!("shutdown complete");
     Ok(())
