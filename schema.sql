@@ -160,7 +160,9 @@ CREATE TABLE IF NOT EXISTS x_archive.bookmark_write_audit_events (
 CREATE TABLE IF NOT EXISTS x_archive.posts (
     id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     provider_id    text NOT NULL UNIQUE,
-    author_user_id uuid NOT NULL REFERENCES x_archive.users (id),
+    -- Legacy evidence can identify a post without a stable provider author id. Official
+    -- normalization fills this link; mutable handles are never synthesized as users.
+    author_user_id uuid REFERENCES x_archive.users (id),
     text           text NOT NULL DEFAULT '',
     long_text      text,
     -- Provider-expanded URL entities are retained as normalized metadata so
@@ -182,6 +184,10 @@ CREATE TABLE IF NOT EXISTS x_archive.posts (
     bookmark_count   bigint,
     impression_count bigint,
     parser_version   integer NOT NULL,
+    -- Official normalization remains the default for every existing API path. The legacy
+    -- importer stamps its bounded projection explicitly and never upgrades its authority.
+    normalization_provenance text NOT NULL DEFAULT 'official-api'
+        CHECK (normalization_provenance IN ('official-api', 'legacy-import')),
     availability   text NOT NULL DEFAULT 'active'
         CHECK (availability IN ('active', 'deleted', 'protected', 'author_suspended',
                                 'unavailable', 'unknown')),
@@ -304,6 +310,104 @@ CREATE TABLE IF NOT EXISTS x_archive.bookmark_snapshot_authority (
     snapshot_id uuid NOT NULL REFERENCES x_archive.snapshots (id),
     updated_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- One bounded legacy source application. The source path and all credential/session material are
+-- deliberately absent. An identical account/source/parser evidence set resolves to one run.
+CREATE TABLE IF NOT EXISTS x_archive.legacy_import_runs (
+    id                         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id                 uuid NOT NULL REFERENCES x_archive.accounts (id),
+    source_kind                text NOT NULL
+        CHECK (source_kind IN ('monolith_csv', 'field_theory_jsonl', 'field_theory_sqlite')),
+    source_version             integer NOT NULL CHECK (source_version > 0),
+    source_digest              text NOT NULL CHECK (source_digest ~ '^[0-9a-f]{64}$'),
+    importer_parser_version    integer NOT NULL CHECK (importer_parser_version > 0),
+    ownership_approval_digest  text NOT NULL
+        CHECK (ownership_approval_digest ~ '^[0-9a-f]{64}$'),
+    status                     text NOT NULL DEFAULT 'running'
+        CHECK (status IN ('running', 'completed', 'failed')),
+    inserted_count             integer NOT NULL DEFAULT 0 CHECK (inserted_count >= 0),
+    matched_count              integer NOT NULL DEFAULT 0 CHECK (matched_count >= 0),
+    updated_count              integer NOT NULL DEFAULT 0 CHECK (updated_count >= 0),
+    conflicted_count           integer NOT NULL DEFAULT 0 CHECK (conflicted_count >= 0),
+    rejected_count             integer NOT NULL DEFAULT 0 CHECK (rejected_count >= 0),
+    unmapped_count             integer NOT NULL DEFAULT 0 CHECK (unmapped_count >= 0),
+    started_at                 timestamptz NOT NULL DEFAULT now(),
+    finished_at                timestamptz,
+    UNIQUE (account_id, source_kind, source_version, source_digest, importer_parser_version),
+    CHECK ((source_kind = 'monolith_csv' AND source_version = 1)
+        OR (source_kind = 'field_theory_jsonl' AND source_version = 1)
+        OR (source_kind = 'field_theory_sqlite' AND source_version = 6)),
+    CHECK ((status = 'running' AND finished_at IS NULL)
+        OR (status IN ('completed', 'failed') AND finished_at IS NOT NULL))
+);
+
+-- Immutable per-row legacy evidence. Post content lives only in the normalized `posts` projection;
+-- organization evidence stays legacy-scoped and cannot become bookmark/folder authority.
+CREATE TABLE IF NOT EXISTS x_archive.legacy_import_items (
+    id                              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    import_run_id                   uuid NOT NULL
+        REFERENCES x_archive.legacy_import_runs (id) ON DELETE CASCADE,
+    source_record_key               text NOT NULL CHECK (length(source_record_key) BETWEEN 1 AND 256),
+    source_row_digest               text NOT NULL CHECK (source_row_digest ~ '^[0-9a-f]{64}$'),
+    provider_post_id                text CHECK (provider_post_id ~ '^[0-9]{1,19}$'),
+    conflicting_provider_post_id    text CHECK (conflicting_provider_post_id ~ '^[0-9]{1,19}$'),
+    post_id                         uuid REFERENCES x_archive.posts (id),
+    canonical_url_digest            text CHECK (canonical_url_digest ~ '^[0-9a-f]{64}$'),
+    content_digest                  text CHECK (content_digest ~ '^[0-9a-f]{64}$'),
+    source_observed_saved_at        timestamptz,
+    source_synced_at                timestamptz,
+    legacy_category_metadata        jsonb NOT NULL DEFAULT '[]'::jsonb
+        CHECK (jsonb_typeof(legacy_category_metadata) = 'array'),
+    legacy_folder_metadata          jsonb NOT NULL DEFAULT '[]'::jsonb
+        CHECK (jsonb_typeof(legacy_folder_metadata) = 'array'),
+    author_identity_resolved        boolean NOT NULL DEFAULT false,
+    resolution                      text NOT NULL
+        CHECK (resolution IN ('provider_post', 'canonical_url', 'identity_conflict', 'unmapped')),
+    provenance                      text NOT NULL DEFAULT 'legacy-import'
+        CHECK (provenance = 'legacy-import'),
+    created_at                      timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (import_run_id, source_record_key),
+    CHECK ((resolution = 'identity_conflict') = (conflicting_provider_post_id IS NOT NULL)),
+    CHECK (post_id IS NULL OR provider_post_id IS NOT NULL)
+);
+
+-- Canonical redacted comparison between immutable legacy evidence and one complete official
+-- snapshot. Persisting the report never invokes snapshot reconciliation or changes authority.
+CREATE TABLE IF NOT EXISTS x_archive.legacy_shadow_reports (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id        uuid NOT NULL REFERENCES x_archive.accounts (id),
+    import_run_id     uuid NOT NULL REFERENCES x_archive.legacy_import_runs (id),
+    snapshot_id       uuid NOT NULL REFERENCES x_archive.snapshots (id),
+    import_digest     text NOT NULL CHECK (import_digest ~ '^[0-9a-f]{64}$'),
+    snapshot_digest   text NOT NULL CHECK (snapshot_digest ~ '^[0-9a-f]{64}$'),
+    report_payload    jsonb NOT NULL CHECK (jsonb_typeof(report_payload) = 'object'),
+    report_digest     text NOT NULL CHECK (report_digest ~ '^[0-9a-f]{64}$'),
+    review_state      text NOT NULL DEFAULT 'owner_review_required'
+        CHECK (review_state IN ('owner_review_required', 'reviewable')),
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (account_id, import_run_id, snapshot_id, import_digest, snapshot_digest),
+    UNIQUE (account_id, report_digest)
+);
+
+-- Explicit owner decision for exactly one current checklist/report digest. Supersession retains
+-- the prior decision for rollback diagnosis rather than deleting it.
+CREATE TABLE IF NOT EXISTS x_archive.legacy_transition_approvals (
+    id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id            uuid NOT NULL REFERENCES x_archive.accounts (id),
+    internal_owner_id     uuid NOT NULL,
+    shadow_report_id      uuid NOT NULL REFERENCES x_archive.legacy_shadow_reports (id),
+    checklist_digest      text NOT NULL CHECK (checklist_digest ~ '^[0-9a-f]{64}$'),
+    owner_evidence_digest text NOT NULL CHECK (owner_evidence_digest ~ '^[0-9a-f]{64}$'),
+    decision              text NOT NULL CHECK (decision IN ('approved', 'rejected')),
+    decided_at            timestamptz NOT NULL,
+    superseded_at         timestamptz,
+    created_at            timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (account_id, shadow_report_id, checklist_digest, owner_evidence_digest, decision)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS legacy_transition_approvals_one_current_idx
+    ON x_archive.legacy_transition_approvals (account_id)
+    WHERE superseded_at IS NULL;
 
 -- A folder membership snapshot stages candidate posts for exactly one native
 -- folder. The staged rows carry no current-state authority before completion.

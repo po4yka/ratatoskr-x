@@ -11,18 +11,27 @@ repository.workspace   = true
 name = "ratatoskr-x"
 path = "src/main.rs"
 
+[[bin]]
+name = "ratatoskr-x-transition"
+path = "src/transition_main.rs"
+
 [dependencies]
 async-nats.workspace = true
 axum.workspace = true
+chrono.workspace = true
 ratatoskr-x-core.workspace = true
 ratatoskr-x-capture.workspace = true
 ratatoskr-x-http.workspace = true
+ratatoskr-x-oauth.workspace = true
 # The disposable-database harness stays out: this dependency never enables test-support.
 ratatoskr-x-persistence.workspace = true
+ratatoskr-x-sync.workspace = true
 ratatoskr-x-telemetry.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace     = true
 tracing.workspace   = true
+uuid.workspace      = true
 
 [dev-dependencies]
 ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }

@@ -1,0 +1,2 @@
+request_id,bookmark_external_id,x_category,tweet_text,tweet_text_tsv,tweet_author,tweet_url,posted_at,synced_at
+1,1001,research,Synthetic monolith post,,synthetic_author,https://x.com/synthetic_author/status/1001,2026-01-01T12:00:00Z,2026-02-01T12:00:00Z

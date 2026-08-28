@@ -6,6 +6,7 @@ mod explicit_capture;
 mod folders;
 mod incremental;
 mod knowledge;
+mod legacy_transition;
 mod social_sources;
 mod writeback;
 
@@ -28,6 +29,14 @@ pub use incremental::{
 };
 pub use knowledge::{
     KnowledgeAnalysisAdmission, KnowledgeAnalysisService, KnowledgeIntegrationError,
+};
+pub use legacy_transition::{
+    ApprovalDecision, ChecklistOutcome, CurrentAccountIdentity, IMPORTER_PARSER_VERSION,
+    ImportCounts, ImportOutcome, LegacyResolution, LegacySourceKind, LegacySourceSelection,
+    LegacySourceVersion, LegacyTransitionError, LegacyTransitionService,
+    OfficialCurrentAccountIdentity, OwnershipApproval, PreflightBatch, ShadowDiff, ShadowDiffClass,
+    ShadowReport, ShadowReportOutcome, ShadowSummary, SourceLimits, TransitionApprovalOutcome,
+    TransitionApprovalRequest,
 };
 pub use writeback::{
     BookmarkAction, BookmarkAdmissionRefusal, BookmarkDryRunOutcome, BookmarkDryRunResult,
