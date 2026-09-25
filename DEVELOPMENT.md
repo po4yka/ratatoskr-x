@@ -28,13 +28,15 @@ export X_TEST_DATABASE_URL=postgres://x:x@127.0.0.1:5432/x
 
 ```bash
 cargo fetch --locked
-cargo deny --locked check
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo build --workspace --locked
 cargo test --workspace --locked
 cargo build --workspace --locked --release
 ```
+
+`cargo deny --locked check` runs in its own `deny` job in the same workflow, not in the gate above,
+so a new RustSec advisory cannot hide a clippy or test failure behind it.
 
 ### Browser-capture broker fixture
 
