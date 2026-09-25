@@ -36,7 +36,7 @@ uuid.workspace      = true
 [dev-dependencies]
 ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
 sqlx.workspace = true
-nkeys = "=0.4.5"
+nkeys = "0.4.5"
 uuid.workspace = true
 
 [lints]

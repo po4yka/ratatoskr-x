@@ -42,21 +42,21 @@ ratatoskr-identifiers = { git = "https://github.com/po4yka/ratatoskr-contracts.g
 ratatoskr-operation-contracts = { git = "https://github.com/po4yka/ratatoskr-contracts.git", rev = "f0dc35fec80e574ea552e9835659fce70360ed79" }
 ratatoskr-document-contracts = { git = "https://github.com/po4yka/ratatoskr-contracts.git", rev = "f0dc35fec80e574ea552e9835659fce70360ed79" }
 
-aes-gcm = { version = "=0.11.1", default-features = false, features = ["aes", "alloc"] }
-async-nats = "=0.50.0"
-axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
-base64 = "=0.23.1"
-chrono = { version = "=0.4.45", default-features = false, features = ["clock", "serde", "std"] }
-figment = { version = "=0.10.19", features = ["env"] }
-futures-util = "=0.3.31"
-metrics = "=0.24.6"
-metrics-exporter-prometheus = { version = "=0.18.3", default-features = false }
-getrandom = "=0.4.3"
-reqwest = { version = "=0.13.4", default-features = false, features = ["json", "rustls"] }
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.151"
-sha2 = "=0.11.0"
-sqlx = { version = "=0.8.6", default-features = false, features = [
+aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "alloc"] }
+async-nats = "0.50.0"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+base64 = "0.23.1"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde", "std"] }
+figment = { version = "0.10.19", features = ["env"] }
+futures-util = "0.3.31"
+metrics = "0.24.6"
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
+getrandom = "0.4.3"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+sqlx = { version = "0.8.6", default-features = false, features = [
     "runtime-tokio",
     "tls-rustls-ring",
     "postgres",
@@ -64,11 +64,11 @@ sqlx = { version = "=0.8.6", default-features = false, features = [
     "uuid",
     "chrono",
 ] }
-thiserror = "=2.0.20"
-tokio = { version = "=1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
-tower = { version = "=0.5.3", features = ["util"] }
-tracing = "=0.1.44"
-tracing-subscriber = { version = "=0.3.23", default-features = false, features = [
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tower = { version = "0.5.3", features = ["util"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = [
     "ansi",
     "env-filter",
     "fmt",
@@ -76,11 +76,11 @@ tracing-subscriber = { version = "=0.3.23", default-features = false, features =
     "registry",
     "std",
 ] }
-uuid = { version = "=1.24.1", features = ["v7"] }
+uuid = { version = "1.24.1", features = ["v7"] }
 # Provider stubs for recorded-fixture tests only.
-wiremock = "=0.6.5"
+wiremock = "0.6.5"
 # Property-based payload-shape variations; dev-dependency of x-normalize only.
-proptest = "=1.11.0"
+proptest = "1.11.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
