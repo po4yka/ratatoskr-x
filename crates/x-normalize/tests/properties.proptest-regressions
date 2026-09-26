@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 6109fd59b0272ef4f4cdea05d6224363b36811f8e0c780b36385db70bea06850 # shrinks to (envelope, all_expected) = (Object {"data": Array [Object {"author_id": String("a2"), "created_at": String("2026-08-01T12:00:00.000Z"), "id": String("p1"), "text": String("plain fixture text"), "zz_future_alpha": Null}], "includes": Object {"media": Array [], "users": Array [Object {"id": String("a2"), "username": String("user_handle")}]}}, [[("zz_future_alpha", Bool(false)), ("zz_future_alpha", Null)]])
