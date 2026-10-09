@@ -1,6 +1,6 @@
 ## 1. Contracts pin
 
-- [ ] 1.1 Move all five `ratatoskr-*` git dependencies to `ad16855c4e7f3d52cd118274faa3b8f3ab4da576` and refresh `Cargo.lock`; a dependency pin has no meaningful RED, so verify that `cargo metadata --locked` reports one source revision and the existing suite stays green.
+- [x] 1.1 Move all five `ratatoskr-*` git dependencies to `ad16855c4e7f3d52cd118274faa3b8f3ab4da576` and refresh `Cargo.lock`; a dependency pin has no meaningful RED, so verify that `cargo metadata --locked` reports one source revision and the existing suite stays green.
 
 ## 2. Operator port
 
