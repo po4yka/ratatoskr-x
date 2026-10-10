@@ -5,7 +5,7 @@ use ratatoskr_operation_contracts::OperationStatus;
 use ratatoskr_social_contracts::SocialSourceUpdated;
 use uuid::Uuid;
 use x_persistence::test_support::TestDatabase;
-use x_sync::PublicPostFailure;
+use x_sync::{PublicPost, PublicPostFailure};
 
 use crate::support::*;
 
@@ -298,6 +298,109 @@ async fn an_inaccessible_post_is_reported_unavailable_and_publishes_nothing() {
     assert_eq!(code, "social.source.unavailable");
     assert!(!retryable);
     assert_eq!(social, 0, "no source and no social event");
+}
+
+/// A resolved post the shared social contract cannot represent is a permanent failure of that one
+/// capture. It must end `Inaccessible` and must never stop the worker, the service or the batch.
+async fn assert_unrepresentable_post_ends_unavailable(unrepresentable: PublicPost) {
+    let test = TestDatabase::create().await.expect("a disposable database");
+    let poison = seed_capture(&test, 1, uuid(9, 1)).await;
+    let behind = seed_capture(&test, 2, uuid(9, 2)).await;
+    let resolver = ScriptedResolver::new([Ok(unrepresentable), Ok(post("A healthy public post."))]);
+    let clock = TestClock::at(START);
+
+    let summary = worker(&test, &resolver, &clock)
+        .run_due_once()
+        .await
+        .expect("a post the contract cannot represent does not fail the pass");
+    assert_eq!(
+        (summary.claimed, summary.unavailable, summary.preserved),
+        (2, 1, 1),
+        "the poison capture ends, the next capture in the batch is still served"
+    );
+
+    let state = capture_state(&test, poison.capture_id).await;
+    assert_eq!((state.0.as_str(), state.3), ("unavailable", true));
+    let behind_state = capture_state(&test, behind.capture_id).await;
+    assert_eq!(
+        (behind_state.0.as_str(), behind_state.3),
+        ("resolved", true)
+    );
+
+    let reported = reports(&test).await;
+    let poison_reports: Vec<_> = reported
+        .iter()
+        .filter(|(_, report)| report.operation_id.0 == poison.operation_id)
+        .collect();
+    let [(_, report)] = poison_reports.as_slice() else {
+        panic!("exactly one report for the poison capture");
+    };
+    assert_eq!(report.status, OperationStatus::Failed);
+    let error = report
+        .error
+        .clone()
+        .expect("a failed report carries its error");
+    assert_eq!(error.code.as_str(), "social.source.unavailable");
+    assert!(!error.retryable);
+    assert_eq!(
+        count(
+            &test,
+            &format!(
+                "select count(*) from x_archive.explicit_sources where owner = '{}'",
+                poison.owner
+            )
+        )
+        .await,
+        0,
+        "no source for the poison capture"
+    );
+    assert_eq!(
+        count(
+            &test,
+            &format!(
+                "select count(*) from x_archive.outbox_events \
+                  where event_type like 'social.source.%' \
+                    and payload->>'tenant_id' = 'user:{}'",
+                poison.owner
+            )
+        )
+        .await,
+        0,
+        "no social event for the poison capture"
+    );
+    let again = worker(&test, &resolver, &clock)
+        .run_due_once()
+        .await
+        .expect("the next pass completes");
+    assert_eq!(
+        again.claimed, 0,
+        "a reported poison capture is never claimed again"
+    );
+    test.cleanup().await.expect("cleanup drops the database");
+}
+
+#[tokio::test]
+async fn a_post_with_empty_text_ends_the_capture_unavailable_instead_of_failing_the_pass() {
+    assert_unrepresentable_post_ends_unavailable(post("")).await;
+}
+
+#[tokio::test]
+async fn a_post_with_a_control_character_ends_the_capture_unavailable() {
+    assert_unrepresentable_post_ends_unavailable(post("bell \u{7} in the text")).await;
+}
+
+#[tokio::test]
+async fn a_post_whose_handle_the_contract_rejects_ends_the_capture_unavailable() {
+    let mut unrepresentable = post("A public post.");
+    unrepresentable.author.username = Some("not a handle!".to_owned());
+    assert_unrepresentable_post_ends_unavailable(unrepresentable).await;
+}
+
+#[tokio::test]
+async fn a_display_name_with_a_control_character_ends_the_capture_unavailable() {
+    let mut unrepresentable = post("A public post.");
+    unrepresentable.author.name = Some("Ada \u{7}Example".to_owned());
+    assert_unrepresentable_post_ends_unavailable(unrepresentable).await;
 }
 
 /// The reproduced tenant-isolation leak: a protected post stored by tenant A's sync must never

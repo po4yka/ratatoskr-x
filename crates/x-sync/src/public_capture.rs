@@ -158,7 +158,9 @@ impl PublicCaptureWorker {
     ///
     /// # Errors
     /// [`PublicCaptureError`] when a statement or an envelope fails. A capture whose outcome did
-    /// not commit stays queued and becomes due again when its lease ends.
+    /// not commit stays queued and becomes due again when its lease ends. A resolved post the
+    /// social contract cannot represent is not an error of the pass: that capture ends
+    /// unavailable.
     pub async fn run_due_once(&self) -> Result<CaptureRunSummary, PublicCaptureError> {
         let claimed = self.claim_due().await?;
         let mut summary = CaptureRunSummary {
@@ -168,8 +170,24 @@ impl PublicCaptureWorker {
         for capture in claimed {
             match self.resolver.resolve(&capture.provider_post_id).await {
                 Ok(post) if post.provider_id == capture.provider_post_id => {
-                    self.preserve(&capture, &post).await?;
-                    summary.preserved += 1;
+                    match self.preserve(&capture, &post).await {
+                        Ok(()) => summary.preserved += 1,
+                        // A post the shared social contract cannot represent (empty text, a
+                        // control character, a handle outside the grammar) is data a user can
+                        // influence, so it ends this one capture. Nothing was written: the
+                        // snapshot is built before the first insert and the transaction rolled
+                        // back when it was dropped.
+                        Err(PublicCaptureError::Snapshot(SnapshotError::Contract(_))) => {
+                            tracing::warn!(
+                                capture_id = %capture.capture_id,
+                                "the resolved post does not satisfy the social contract"
+                            );
+                            self.terminate(&capture, PublicPostFailure::Inaccessible)
+                                .await?;
+                            summary.unavailable += 1;
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
                 // A different post than the one asked for is never published.
                 Ok(_) => {
