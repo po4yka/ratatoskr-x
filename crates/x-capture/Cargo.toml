@@ -29,6 +29,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true, features = ["sync"] }
 
 [lints]
 workspace = true

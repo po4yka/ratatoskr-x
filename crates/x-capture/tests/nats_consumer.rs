@@ -30,7 +30,13 @@ const X_COMMAND: &str = r#"{
   }
 }"#;
 
+/// Both tests publish to `COMMAND_SUBJECT` on the one shared `ratatoskr_commands` stream, so a
+/// message published by one would also reach the durable the other created. Holding this for the
+/// whole life of a harness runs the two scenarios one at a time.
+static SHARED_STREAM: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 struct Harness {
+    _exclusive: tokio::sync::MutexGuard<'static, ()>,
     database: TestDatabase,
     context: jetstream::Context,
     client: async_nats::Client,
@@ -41,6 +47,7 @@ struct Harness {
 
 impl Harness {
     async fn start() -> Self {
+        let exclusive = SHARED_STREAM.lock().await;
         let database = TestDatabase::create().await.expect("test database");
         let client = async_nats::connect(nats_url()).await.expect("test NATS");
         let context = jetstream::new(client.clone());
@@ -65,6 +72,7 @@ impl Harness {
             .await
             .expect("Platform preprovisions the X durable");
         Self {
+            _exclusive: exclusive,
             database,
             context,
             client,
