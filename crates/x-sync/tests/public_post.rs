@@ -155,6 +155,16 @@ async fn throttling_and_server_errors_are_transient() {
     }
 }
 
+/// A payment-required plan problem and a request timeout say nothing about the post, so neither
+/// may end a capture for good.
+#[tokio::test]
+async fn a_plan_problem_and_a_request_timeout_are_transient() {
+    for status in [402_u16, 408] {
+        let failure = failure_for(ResponseTemplate::new(status)).await;
+        assert_eq!(failure, PublicPostFailure::Transient, "{status}");
+    }
+}
+
 #[tokio::test]
 async fn a_slow_provider_is_transient() {
     let failure = failure_for(

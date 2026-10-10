@@ -5,6 +5,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use async_nats::jetstream;
+use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull::MessagesErrorKind;
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt as _;
@@ -25,6 +26,8 @@ const REPORT_PRODUCER: &str = "ratatoskr-x";
 
 /// Pause after a recoverable stream error, so a broken connection cannot spin the loop.
 const RETRY_PAUSE: Duration = Duration::from_secs(1);
+/// How long the broker waits before redelivering a command whose persistence failed.
+const REDELIVERY_DELAY: Duration = Duration::from_secs(5);
 
 /// The only `JetStream` subject the X browser-capture consumer may receive.
 pub const COMMAND_SUBJECT: &str = "cmd.x.capture.requested.v1";
@@ -277,6 +280,16 @@ pub enum DeliveryError {
     Outbox(#[from] OutboxError),
 }
 
+impl DeliveryError {
+    /// Whether redelivery can never change the outcome: the command itself is unacceptable.
+    fn is_permanent(&self) -> bool {
+        matches!(
+            self,
+            Self::Command(_) | Self::InvalidTimestamp | Self::Serialize(_)
+        )
+    }
+}
+
 /// Totals from one live `JetStream` consumer session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ConsumerReport {
@@ -284,9 +297,9 @@ pub struct ConsumerReport {
     pub applied: u64,
     /// Redeliveries absorbed by the durable X inbox.
     pub duplicates: u64,
-    /// Poison commands acknowledged after rejection.
+    /// Poison commands terminated after rejection.
     pub rejected: u64,
-    /// Valid commands left unacknowledged for `JetStream` redelivery after a transient failure.
+    /// Commands handed back to `JetStream` for a delayed redelivery after a transient failure.
     pub retryable_failures: u64,
 }
 
@@ -356,14 +369,15 @@ pub async fn consume_browser_commands(
                 report.duplicates += 1;
                 acknowledge(&message).await;
             }
-            Err(DeliveryError::Command(error)) => {
+            Err(error) if error.is_permanent() => {
                 report.rejected += 1;
-                tracing::warn!(%error, "rejecting a poison social capture command");
-                acknowledge(&message).await;
+                tracing::warn!(%error, "terminating a poison social capture command");
+                settle(&message, AckKind::Term).await;
             }
             Err(error) => {
                 report.retryable_failures += 1;
                 tracing::error!(%error, "leaving social capture command for redelivery");
+                settle(&message, AckKind::Nak(Some(REDELIVERY_DELAY))).await;
             }
         }
     }
@@ -411,7 +425,13 @@ async fn browser_consumer(
 }
 
 async fn acknowledge(message: &jetstream::Message) {
-    if let Err(error) = message.ack().await {
+    settle(message, AckKind::Ack).await;
+}
+
+/// Tells the broker what became of `message`: stored, never acceptable (`Term`) or worth another
+/// attempt after a pause (`Nak`).
+async fn settle(message: &jetstream::Message, kind: AckKind) {
+    if let Err(error) = message.ack_with(kind).await {
         tracing::warn!(%error, "the social capture command acknowledgement failed");
     }
 }

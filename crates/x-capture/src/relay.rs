@@ -187,8 +187,9 @@ impl OutboxRelay {
         .map_err(RelayError::Query)?;
         let mut report = RelayReport::default();
         for (id, event_type, payload) in rows {
-            let subject =
-                subject_for(&event_type).ok_or(RelayError::UnmappableEventType(event_type))?;
+            let Some(subject) = subject_for(&event_type) else {
+                return Err(RelayError::UnmappableEventType(event_type));
+            };
             match self
                 .publisher
                 .publish(&subject, &id.to_string(), payload.into_bytes())
@@ -199,6 +200,12 @@ impl OutboxRelay {
                     report.published += 1;
                 }
                 Err(failure) => {
+                    tracing::warn!(
+                        %failure,
+                        row_id = %id,
+                        %event_type,
+                        "the outbox relay could not publish a row; it is backed off"
+                    );
                     self.record_failure(id, failure).await?;
                     report.failed += 1;
                     break;

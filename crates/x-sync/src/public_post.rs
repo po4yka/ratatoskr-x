@@ -162,7 +162,14 @@ impl AppBearerResolver {
             .header(reqwest::header::ACCEPT, "application/json")
             .send()
             .await
-            .map_err(|_| PublicPostFailure::Transient)?;
+            .map_err(|error| {
+                // Content-free: the class only. The error text can carry the request URL.
+                tracing::warn!(
+                    class = transport_class(&error),
+                    "the public post request failed before a response"
+                );
+                PublicPostFailure::Transient
+            })?;
         classify_status(response.status())?;
         let body = read_capped(&mut response).await?;
         parse_post(&body)
@@ -193,13 +200,35 @@ fn classify_status(status: reqwest::StatusCode) -> Result<(), PublicPostFailure>
         );
         return Err(PublicPostFailure::Transient);
     }
+    if status == reqwest::StatusCode::PAYMENT_REQUIRED {
+        // The plan or its quota, not the post: an operator problem as well.
+        tracing::error!(
+            status = status.as_u16(),
+            "the X API refused public capture requests for the current plan"
+        );
+        return Err(PublicPostFailure::Transient);
+    }
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || status == reqwest::StatusCode::REQUEST_TIMEOUT
         || status.is_server_error()
         || status.is_redirection()
     {
         return Err(PublicPostFailure::Transient);
     }
     Err(PublicPostFailure::Inaccessible)
+}
+
+/// A fixed, content-free class of a transport error.
+fn transport_class(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connect"
+    } else if error.is_builder() {
+        "request_build"
+    } else {
+        "other"
+    }
 }
 
 /// Reads the body, refusing anything longer than [`MAX_BODY_BYTES`].
