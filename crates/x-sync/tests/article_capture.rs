@@ -6,11 +6,15 @@
     reason = "assertions in a test binary"
 )]
 
+use std::fmt::Write as _;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use ratatoskr_document_contracts::{CaptureUrl, ContentCaptureRequested};
+use ratatoskr_event_envelope::CommandEnvelope;
+use sha2::{Digest as _, Sha256};
 use x_budget::gate::{BudgetClass, BudgetGate, Clock};
 use x_persistence::test_support::TestDatabase;
 use x_sync::{
@@ -80,6 +84,76 @@ async fn bookmark_entity_expanded_url_queues_extractor_with_source_provenance() 
     assert!(
         causation_id.starts_with("social_source:"),
         "the command traces back to the source post"
+    );
+}
+
+#[tokio::test]
+async fn article_capture_row_is_a_complete_command_envelope() {
+    let test = TestDatabase::create().await.expect("a disposable database");
+    let account = test
+        .seed_account("article-command-envelope-owner")
+        .await
+        .expect("the account seeds");
+    let owner = account_owner(&test, account).await;
+    bookmark_snapshot_service(test.database.clone())
+        .run(
+            account,
+            &OneBookmarkPageSource("https://example.test/envelope"),
+            None,
+        )
+        .await
+        .expect("the bookmark snapshot completes");
+
+    let row: (uuid::Uuid, String, serde_json::Value, String) = sqlx::query_as(
+        "select outbox.id, outbox.aggregate, outbox.payload, capture.id::text \
+         from x_archive.outbox_events outbox \
+         join x_archive.article_captures capture \
+           on outbox.correlation_id = capture.correlation_id \
+         where outbox.event_type = 'content.capture.requested.v1'",
+    )
+    .fetch_one(test.database.pool())
+    .await
+    .expect("one article command row is stored");
+    test.cleanup().await.expect("cleanup drops the database");
+
+    let (row_id, aggregate, payload, capture_id) = row;
+    let command = CommandEnvelope::from_json(payload.to_string().as_bytes())
+        .expect("the stored payload is a complete command envelope");
+    assert_eq!(command.command_id.0, row_id, "the row id is the command id");
+    assert_eq!(command.producer.as_str(), "ratatoskr-x");
+    assert_eq!(
+        command.tenant_id.map(|tenant| tenant.to_string()),
+        Some(format!("user:{owner}"))
+    );
+    assert_eq!(
+        command.aggregate_id.to_wire(),
+        format!("operation:{capture_id}")
+    );
+    assert_eq!(aggregate, format!("operation:{capture_id}"));
+    assert_eq!(
+        command.correlation_id.to_wire(),
+        format!("article_capture:{capture_id}")
+    );
+    let request: ContentCaptureRequested = command
+        .payload_as()
+        .expect("the payload is the content capture contract");
+    assert_eq!(request.operation_id.0.to_string(), capture_id);
+    assert_eq!(
+        request.url.as_ref().map(CaptureUrl::as_str),
+        Some("https://example.test/envelope")
+    );
+    assert!(request.blob.is_none());
+    let digest =
+        Sha256::digest(capture_id.as_bytes())
+            .iter()
+            .fold(String::new(), |mut hex, byte| {
+                let _ = write!(hex, "{byte:02x}");
+                hex
+            });
+    assert_eq!(
+        request.idempotency_key.hex.as_str(),
+        digest,
+        "the idempotency key is the sha256 of the capture id"
     );
 }
 

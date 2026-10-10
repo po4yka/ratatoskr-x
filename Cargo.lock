@@ -2345,7 +2345,12 @@ dependencies = [
  "async-nats",
  "axum",
  "chrono",
+ "futures-util",
  "nkeys",
+ "ratatoskr-event-envelope",
+ "ratatoskr-operation-contracts",
+ "ratatoskr-social-contracts",
+ "ratatoskr-x-budget",
  "ratatoskr-x-capture",
  "ratatoskr-x-core",
  "ratatoskr-x-http",
@@ -2359,6 +2364,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -2381,6 +2387,8 @@ dependencies = [
  "chrono",
  "futures-util",
  "ratatoskr-event-envelope",
+ "ratatoskr-identifiers",
+ "ratatoskr-operation-contracts",
  "ratatoskr-social-contracts",
  "ratatoskr-x-persistence",
  "serde_json",
@@ -2446,6 +2454,8 @@ dependencies = [
 name = "ratatoskr-x-persistence"
 version = "0.1.0"
 dependencies = [
+ "ratatoskr-event-envelope",
+ "serde_json",
  "sqlx",
  "thiserror",
  "tokio",
@@ -2457,6 +2467,8 @@ name = "ratatoskr-x-sync"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "metrics",
+ "metrics-exporter-prometheus",
  "ratatoskr-document-contracts",
  "ratatoskr-event-envelope",
  "ratatoskr-identifiers",
@@ -2473,6 +2485,7 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "tracing",
  "uuid",
  "wiremock",
 ]

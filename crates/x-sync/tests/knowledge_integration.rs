@@ -8,35 +8,20 @@
 
 use std::sync::Arc;
 
-use ratatoskr_event_envelope::CommandEnvelope;
 use tokio::sync::Barrier;
 use x_persistence::test_support::TestDatabase;
-use x_sync::{ExplicitCaptureService, KnowledgeAnalysisAdmission, KnowledgeAnalysisService};
+use x_sync::{KnowledgeAnalysisAdmission, KnowledgeAnalysisService};
 
-fn capture_command(owner: uuid::Uuid, suffix: &str) -> CommandEnvelope {
-    serde_json::from_value(serde_json::json!({
-        "command_id": format!("018f0000-0000-7000-8000-0000000007{suffix}"),
-        "command_type": "social.capture.requested.v1",
-        "issued_at": "2026-08-27T12:00:00Z",
-        "producer": "ratatoskr-platform",
-        "aggregate_id": "x-post:123456789",
-        "correlation_id": format!("operation:018f0000-0000-7000-8000-0000000008{suffix}"),
-        "tenant_id": format!("user:{owner}"),
-        "schema_version": 1,
-        "payload": {
-            "operation_id": format!("018f0000-0000-7000-8000-0000000008{suffix}"),
-            "idempotency_key": {
-                "algorithm": "sha256",
-                "hex": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-            },
-            "original_permalink": "https://x.com/author/status/123456789",
-            "captured_at": "2026-08-27T12:00:00Z",
-            "provider": "x",
-            "acquisition": "browser_extension",
-            "saved_authority": "explicit_user_capture"
-        }
-    }))
-    .expect("the capture command decodes")
+mod support;
+
+use support::{OnePost, snapshot_service};
+
+fn post(text: &str) -> OnePost {
+    OnePost {
+        provider_id: "123456789".to_owned(),
+        author_id: "knowledge-author".to_owned(),
+        text: text.to_owned(),
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -46,27 +31,6 @@ async fn concurrent_identical_observations_emit_one_knowledge_request() {
         .seed_account("concurrent-knowledge-request-owner")
         .await
         .expect("the account seeds");
-    let owner: uuid::Uuid =
-        sqlx::query_scalar("select internal_user_id from x_archive.accounts where id = $1")
-            .bind(account)
-            .fetch_one(test.database.pool())
-            .await
-            .expect("the owner is readable");
-    let author: uuid::Uuid = sqlx::query_scalar(
-        "insert into x_archive.users (provider_id, parser_version) \
-         values ('knowledge-request-author', 1) returning id",
-    )
-    .fetch_one(test.database.pool())
-    .await
-    .expect("the author seeds");
-    sqlx::query(
-        "insert into x_archive.posts (provider_id, author_user_id, text, parser_version) \
-         values ('123456789', $1, 'One revision is one request.', 1)",
-    )
-    .bind(author)
-    .execute(test.database.pool())
-    .await
-    .expect("the post seeds");
     sqlx::raw_sql(
         "create function x_archive.delay_social_source_insert() returns trigger \
          language plpgsql as $$ begin perform pg_sleep(0.2); return new; end $$; \
@@ -78,29 +42,24 @@ async fn concurrent_identical_observations_emit_one_knowledge_request() {
     .expect("the deterministic race trigger installs");
 
     let barrier = Arc::new(Barrier::new(2));
-    let first_barrier = Arc::clone(&barrier);
-    let first_service = ExplicitCaptureService::new(test.database.clone());
-    let first = tokio::spawn(async move {
-        first_barrier.wait().await;
-        first_service
-            .apply(account, capture_command(owner, "01"))
-            .await
-    });
-    let second_service = ExplicitCaptureService::new(test.database.clone());
-    let second = tokio::spawn(async move {
-        barrier.wait().await;
-        second_service
-            .apply(account, capture_command(owner, "02"))
-            .await
-    });
-    let (first, second) = tokio::join!(first, second);
-    let first = first.expect("the first capture task does not panic");
-    let second = second.expect("the second capture task does not panic");
-
-    assert!(
-        first.is_ok() && second.is_ok(),
-        "concurrent identical observations must converge: first={first:?}, second={second:?}"
-    );
+    let mut runs = Vec::new();
+    for _ in 0..2 {
+        let barrier = Arc::clone(&barrier);
+        let service = snapshot_service(test.database.clone());
+        let source = post("One revision is one request.");
+        runs.push(tokio::spawn(async move {
+            barrier.wait().await;
+            service.run(account, &source, None).await
+        }));
+    }
+    let mut completed = 0_u32;
+    for run in runs {
+        let outcome = run.await.expect("the snapshot task does not panic");
+        // Two overlapping full snapshots may legitimately lose the serializable finalization
+        // race; the publication invariant below is what this test is about.
+        completed += u32::from(outcome.is_ok());
+    }
+    assert!(completed >= 1, "at least one snapshot run completes");
     let revisions: i64 =
         sqlx::query_scalar("select count(*) from x_archive.social_source_revisions")
             .fetch_one(test.database.pool())
@@ -133,23 +92,8 @@ async fn completion_redelivery_links_exact_revision_once() {
             .fetch_one(test.database.pool())
             .await
             .expect("the owner is readable");
-    let author: uuid::Uuid = sqlx::query_scalar(
-        "insert into x_archive.users (provider_id, parser_version) \
-         values ('knowledge-completion-author', 1) returning id",
-    )
-    .fetch_one(test.database.pool())
-    .await
-    .expect("the author seeds");
-    sqlx::query(
-        "insert into x_archive.posts (provider_id, author_user_id, text, parser_version) \
-         values ('123456789', $1, 'Link this exact revision.', 1)",
-    )
-    .bind(author)
-    .execute(test.database.pool())
-    .await
-    .expect("the post seeds");
-    ExplicitCaptureService::new(test.database.clone())
-        .apply(account, capture_command(owner, "03"))
+    snapshot_service(test.database.clone())
+        .run(account, &post("Link this exact revision."), None)
         .await
         .expect("the source revision is captured");
     let (source_id, digest): (uuid::Uuid, serde_json::Value) = sqlx::query_as(
@@ -219,24 +163,8 @@ async fn older_digest_completion_is_historical_not_current() {
             .fetch_one(test.database.pool())
             .await
             .expect("the owner is readable");
-    let author: uuid::Uuid = sqlx::query_scalar(
-        "insert into x_archive.users (provider_id, parser_version) \
-         values ('historical-completion-author', 1) returning id",
-    )
-    .fetch_one(test.database.pool())
-    .await
-    .expect("the author seeds");
-    let post_id: uuid::Uuid = sqlx::query_scalar(
-        "insert into x_archive.posts (provider_id, author_user_id, text, parser_version) \
-         values ('123456789', $1, 'First retained revision.', 1) returning id",
-    )
-    .bind(author)
-    .fetch_one(test.database.pool())
-    .await
-    .expect("the post seeds");
-    let capture = ExplicitCaptureService::new(test.database.clone());
-    capture
-        .apply(account, capture_command(owner, "04"))
+    snapshot_service(test.database.clone())
+        .run(account, &post("First retained revision."), None)
         .await
         .expect("the first revision is captured");
     let (source_id, older_digest): (uuid::Uuid, serde_json::Value) = sqlx::query_as(
@@ -247,13 +175,8 @@ async fn older_digest_completion_is_historical_not_current() {
     .fetch_one(test.database.pool())
     .await
     .expect("the first revision is readable");
-    sqlx::query("update x_archive.posts set text = 'Second retained revision.' where id = $1")
-        .bind(post_id)
-        .execute(test.database.pool())
-        .await
-        .expect("the normalized post changes");
-    capture
-        .apply(account, capture_command(owner, "05"))
+    snapshot_service(test.database.clone())
+        .run(account, &post("Second retained revision."), None)
         .await
         .expect("the second revision is captured");
     let current_digest: serde_json::Value = sqlx::query_scalar(

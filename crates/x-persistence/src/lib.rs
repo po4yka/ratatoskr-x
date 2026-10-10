@@ -6,6 +6,7 @@ pub mod credentials;
 pub mod database;
 pub mod error;
 pub mod oauth_intents;
+pub mod outbox;
 
 #[cfg(feature = "test-support")]
 pub mod test_support;

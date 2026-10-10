@@ -625,16 +625,34 @@ CREATE TABLE IF NOT EXISTS x_archive.post_article_links (
     PRIMARY KEY (social_source_id, article_capture_id)
 );
 
+-- Every row is the COMPLETE canonical envelope (an EventEnvelope, or a CommandEnvelope for
+-- content.capture.requested.v1), and `id` is the envelope's own event or command id: the relay
+-- publishes `payload` unchanged with `id` as the broker deduplication id (XR-021 CONTRACTS.md
+-- S02). `id` has no default so a bare payload cannot be inserted by accident, and the closed
+-- `event_type` list means a row the relay cannot map to a subject cannot exist.
 CREATE TABLE IF NOT EXISTS x_archive.outbox_events (
-    id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    aggregate      text NOT NULL,
-    event_type     text NOT NULL,
-    payload        jsonb NOT NULL,
-    correlation_id text,
-    causation_id   text,
-    created_at     timestamptz NOT NULL DEFAULT now(),
-    published_at   timestamptz
+    id              uuid PRIMARY KEY,
+    aggregate       text NOT NULL,
+    event_type      text NOT NULL
+        CONSTRAINT outbox_events_event_type_allowed
+        CHECK (event_type IN ('platform.operation.reported.v1',
+                              'social.source.captured.v1',
+                              'social.source.updated.v1',
+                              'social.source.removed.v1',
+                              'content.capture.requested.v1')),
+    payload         jsonb NOT NULL,
+    correlation_id  text,
+    causation_id    text,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    published_at    timestamptz,
+    attempt_count   integer NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    last_error      text,
+    next_attempt_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS outbox_events_unpublished_idx
+    ON x_archive.outbox_events (next_attempt_at, created_at, id)
+    WHERE published_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS x_archive.inbox_events (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -645,16 +663,59 @@ CREATE TABLE IF NOT EXISTS x_archive.inbox_events (
     consumed_at timestamptz
 );
 
--- An explicit browser capture is local user intent, not a native X bookmark.
--- `command_id` is retained separately from the inbox so the domain record explains
--- which at-least-once delivery created it without implying provider Saved authority.
+-- An explicit browser capture is local user intent, not a native X bookmark, and it belongs to
+-- the tenant that named the permalink. `command_id` is retained separately from the inbox so the
+-- domain record explains which at-least-once delivery created it without implying provider Saved
+-- authority. `owner` comes from the command's tenant (a command without one is a poison command),
+-- and the row is also the retry ledger of the public resolution worker: `attempts` counts the
+-- transient failures so far, `next_attempt_at` is when the next try is due (and, while a worker
+-- holds the row, the end of its lease), and `reported_at` is set in the same statement that inserts
+-- the one terminal operation report, so a redelivery or a crash can only ever report once.
+-- `provider_post_id` is NULL only for a permalink that names no status; that row is terminal
+-- `unavailable` from the moment it is stored.
 CREATE TABLE IF NOT EXISTS x_archive.explicit_captures (
     capture_id         uuid PRIMARY KEY,
     command_id         text NOT NULL UNIQUE,
-    operation_id       text NOT NULL,
+    operation_id       uuid NOT NULL,
+    owner              uuid NOT NULL,
+    provider_post_id   text CHECK (provider_post_id ~ '^[0-9]{1,19}$'),
     original_permalink text NOT NULL,
     captured_at        timestamptz NOT NULL,
     acquisition        text NOT NULL CHECK (acquisition = 'browser_extension'),
     saved_authority    text NOT NULL CHECK (saved_authority = 'explicit_user_capture'),
-    created_at         timestamptz NOT NULL DEFAULT now()
+    status             text NOT NULL DEFAULT 'accepted'
+        CHECK (status IN ('accepted', 'resolved', 'unavailable')),
+    attempts           integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    next_attempt_at    timestamptz NOT NULL DEFAULT now(),
+    social_source_id   uuid,
+    reported_at        timestamptz,
+    created_at         timestamptz NOT NULL DEFAULT now(),
+    CHECK (provider_post_id IS NOT NULL OR status = 'unavailable')
+);
+
+CREATE INDEX IF NOT EXISTS explicit_captures_due_idx
+    ON x_archive.explicit_captures (next_attempt_at)
+    WHERE status = 'accepted';
+
+-- What the app-only public call returned for one owner's capture of one post. It is deliberately
+-- NOT derived from x_archive.posts: that table is shared per provider id across accounts, and
+-- an owner must only ever receive what the public call returned for them. The pair
+-- (owner, provider_post_id) is the identity, so two tenants capturing one public post get
+-- distinct `social_source_id`s and each only their own events.
+CREATE TABLE IF NOT EXISTS x_archive.explicit_sources (
+    social_source_id      uuid PRIMARY KEY,
+    owner                 uuid NOT NULL,
+    provider_post_id      text NOT NULL CHECK (provider_post_id ~ '^[0-9]{1,19}$'),
+    author_provider_id    text NOT NULL,
+    author_username       text,
+    author_display_name   text,
+    text                  text NOT NULL,
+    long_text             text,
+    published_at          timestamptz,
+    expanded_urls         jsonb NOT NULL DEFAULT '[]'::jsonb,
+    current_content_digest jsonb NOT NULL,
+    captured_at           timestamptz NOT NULL,
+    created_at            timestamptz NOT NULL DEFAULT now(),
+    updated_at            timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (owner, provider_post_id)
 );

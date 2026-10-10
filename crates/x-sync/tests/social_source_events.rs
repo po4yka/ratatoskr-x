@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
-use ratatoskr_event_envelope::EventPayload;
+use ratatoskr_event_envelope::{EventEnvelope, EventPayload};
 use ratatoskr_social_contracts::SocialSourceCaptured;
 use x_budget::gate::{BudgetClass, BudgetGate, Clock};
 use x_persistence::test_support::TestDatabase;
@@ -167,8 +167,11 @@ async fn bookmark_capture_serializes_the_pinned_social_contract_fixture() {
     test.cleanup().await.expect("cleanup drops the database");
 
     let payload = payload.expect("a bookmark capture emits the SocialSource captured event");
-    let event: SocialSourceCaptured =
-        serde_json::from_value(payload).expect("the outbox payload matches the pinned contract");
+    let envelope = EventEnvelope::from_json(payload.to_string().as_bytes())
+        .expect("the outbox payload is a complete event envelope");
+    let event: SocialSourceCaptured = envelope
+        .payload_as()
+        .expect("the envelope payload matches the pinned contract");
     let source = serde_json::to_value(event.source).expect("the source serializes");
     assert_eq!(source["platform"], "x");
     assert_eq!(source["external_post_id"], "1234567890123456789");

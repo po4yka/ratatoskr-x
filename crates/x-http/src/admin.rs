@@ -16,6 +16,13 @@ use axum::routing::get;
 use serde::Serialize;
 use x_core::identity;
 
+/// The bus check has not been configured: the service has no broker tasks to wait for.
+const BUS_UNCONFIGURED: u8 = 0;
+/// Every broker task is running.
+const BUS_UP: u8 = 1;
+/// A broker task stopped; the service can no longer finish its work.
+const BUS_DOWN: u8 = 2;
+
 /// The lifecycle phase after bootstrap completed.
 const READY: u8 = 1;
 /// The lifecycle phase once shutdown started; readiness never returns during it.
@@ -31,6 +38,7 @@ pub const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=ut
 pub struct RuntimeState {
     lifecycle: AtomicU8,
     database_ready: AtomicBool,
+    bus: AtomicU8,
 }
 
 impl RuntimeState {
@@ -43,6 +51,16 @@ impl RuntimeState {
     /// Marks the database dependency as met.
     pub fn mark_database_ready(&self) {
         self.database_ready.store(true, Ordering::Release);
+    }
+
+    /// Records whether the service's broker tasks are running.
+    ///
+    /// The first call registers the `bus` readiness check; a service without broker tasks never
+    /// calls it and has no such check. `false` is how a stopped consumer, worker or relay makes
+    /// the service leave readiness instead of only logging the error.
+    pub fn set_bus_ready(&self, ready: bool) {
+        self.bus
+            .store(if ready { BUS_UP } else { BUS_DOWN }, Ordering::Release);
     }
 
     /// Marks bootstrap complete.
@@ -63,12 +81,23 @@ impl RuntimeState {
 
     fn readiness(&self) -> (bool, Vec<CheckStatus>) {
         let database = self.database_ready.load(Ordering::Acquire);
-        let checks = vec![CheckStatus {
+        let mut checks = vec![CheckStatus {
             name: "database".to_owned(),
             ready: database,
         }];
-        let draining = self.is_draining();
-        (!draining && database, checks)
+        let mut ready = database;
+        match self.bus.load(Ordering::Acquire) {
+            BUS_UNCONFIGURED => {}
+            state => {
+                let bus = state == BUS_UP;
+                checks.push(CheckStatus {
+                    name: "bus".to_owned(),
+                    ready: bus,
+                });
+                ready &= bus;
+            }
+        }
+        (!self.is_draining() && ready, checks)
     }
 }
 

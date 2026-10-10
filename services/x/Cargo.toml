@@ -19,6 +19,8 @@ path = "src/transition_main.rs"
 async-nats.workspace = true
 axum.workspace = true
 chrono.workspace = true
+futures-util.workspace = true
+ratatoskr-x-budget.workspace = true
 ratatoskr-x-core.workspace = true
 ratatoskr-x-capture.workspace = true
 ratatoskr-x-http.workspace = true
@@ -29,13 +31,17 @@ ratatoskr-x-sync.workspace = true
 ratatoskr-x-telemetry.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace     = true
+tokio = { workspace = true, features = ["sync"] }
 tracing.workspace   = true
 uuid.workspace      = true
 
 [dev-dependencies]
 ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
+ratatoskr-event-envelope.workspace = true
+ratatoskr-operation-contracts.workspace = true
+ratatoskr-social-contracts.workspace = true
 sqlx.workspace = true
+wiremock.workspace = true
 nkeys = "0.4.5"
 uuid.workspace = true
 

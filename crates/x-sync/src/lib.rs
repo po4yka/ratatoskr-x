@@ -2,11 +2,13 @@
 
 mod articles;
 mod compliance;
-mod explicit_capture;
+mod envelopes;
 mod folders;
 mod incremental;
 mod knowledge;
 mod legacy_transition;
+mod public_capture;
+mod public_post;
 mod social_sources;
 mod writeback;
 
@@ -18,7 +20,14 @@ pub use compliance::{
     ComplianceRevalidationService, ComplianceRevalidationSource, ComplianceRunSummary,
     ComplianceSourceError,
 };
-pub use explicit_capture::{ExplicitCaptureError, ExplicitCaptureService};
+pub use envelopes::QueueError;
+pub use public_capture::{
+    CapturePolicy, CaptureRunSummary, PublicCaptureError, PublicCaptureWorker,
+};
+pub use public_post::{
+    AppBearerResolver, PublicAuthor, PublicPost, PublicPostConfigError, PublicPostFailure,
+    PublicPostResolver,
+};
 
 pub use folders::{
     FolderCapability, FolderMembershipPage, FolderMembershipPageSource,
@@ -131,6 +140,12 @@ pub enum SnapshotError {
     /// A database query failed.
     #[error("a bookmark snapshot database query failed")]
     Query(#[source] sqlx::Error),
+    /// The source event could not be built or queued as a complete envelope.
+    #[error(transparent)]
+    Queue(#[from] QueueError),
+    /// A linked-article capture could not be recorded or queued.
+    #[error(transparent)]
+    Article(#[from] ArticleCaptureError),
     /// A normalized post did not have its required normalized author row.
     #[error("a normalized post had no persisted author row")]
     PersistedAuthorMissing,

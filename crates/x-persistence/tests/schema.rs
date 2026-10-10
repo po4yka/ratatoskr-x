@@ -13,7 +13,7 @@ use x_persistence::database::Database;
 #[path = "schema/legacy_transition.rs"]
 mod legacy_transition;
 
-/// The forty tables the owned schema must contain, no more and no fewer.
+/// The forty-one tables the owned schema must contain, no more and no fewer.
 const OWNED_TABLES: &[&str] = &[
     "accounts",
     "api_budget_windows",
@@ -31,6 +31,7 @@ const OWNED_TABLES: &[&str] = &[
     "compliance_revalidation_ledger",
     "credentials",
     "explicit_captures",
+    "explicit_sources",
     "folder_capability_limits",
     "folder_membership_observations",
     "folder_membership_snapshot_authority",

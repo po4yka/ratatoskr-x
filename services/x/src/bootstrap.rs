@@ -19,22 +19,36 @@ pub enum BootstrapError {
     /// The broker connection or X command consumer could not start.
     #[error("the NATS command consumer could not start: {0}")]
     Nats(String),
+    /// The public-capture bearer token file could not be read.
+    #[error("the public-capture bearer token could not be read")]
+    BearerToken(#[source] std::io::Error),
+    /// The public-capture bearer token file holds no token.
+    #[error("the public-capture bearer token file is empty")]
+    BearerTokenEmpty,
+    /// The public post resolver could not be built.
+    #[error("the public post resolver could not start: {0}")]
+    PublicCapture(String),
+    /// A bus task stopped before shutdown, so the service left readiness and exited.
+    #[error("a bus task stopped: {0}")]
+    BusTask(String),
     /// The admin listener could not bind.
     #[error("the admin listener could not bind")]
     Listener(#[source] std::io::Error),
 }
 
 impl BootstrapError {
-    /// The process exit status this failure maps to: `EX_CONFIG` (78) only for configuration
-    /// rejection, one for every other failing subsystem.
+    /// The process exit status this failure maps to: `EX_CONFIG` (78) for configuration rejection
+    /// and a missing credential, one for every other failing subsystem.
     #[must_use]
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::Config(_) => 78,
+            Self::Config(_) | Self::BearerToken(_) | Self::BearerTokenEmpty => 78,
             Self::Telemetry(_)
             | Self::Persistence(_)
             | Self::NatsSeed(_)
             | Self::Nats(_)
+            | Self::PublicCapture(_)
+            | Self::BusTask(_)
             | Self::Listener(_) => 1,
         }
     }

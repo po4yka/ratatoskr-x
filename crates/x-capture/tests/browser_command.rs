@@ -41,3 +41,18 @@ fn accepts_x_and_rejects_a_different_social_owner() {
         Err(CaptureCommandError::WrongProvider),
     );
 }
+
+#[test]
+fn a_command_without_a_tenant_names_no_owner_and_is_refused() {
+    let mut value: serde_json::Value = serde_json::from_str(X_COMMAND).expect("fixture is JSON");
+    value
+        .as_object_mut()
+        .expect("the fixture is an object")
+        .remove("tenant_id");
+    let command =
+        CommandEnvelope::from_json(value.to_string().as_bytes()).expect("the envelope parses");
+    assert_eq!(
+        validate_browser_capture(&command),
+        Err(CaptureCommandError::MissingTenant),
+    );
+}

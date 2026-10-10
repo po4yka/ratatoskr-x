@@ -142,3 +142,36 @@ async fn state_endpoints_disable_caching() {
         body_string(&mut response).await;
     }
 }
+
+#[tokio::test]
+async fn a_stopped_bus_task_makes_readiness_fail_and_names_the_bus() {
+    let state = Arc::new(RuntimeState::new());
+    state.mark_database_ready();
+    state.set_bus_ready(true);
+    let router = admin_router(state.clone(), String::new);
+    let request = || {
+        Request::builder()
+            .uri("/health/ready")
+            .body(Body::empty())
+            .expect("request")
+    };
+    let mut up = router.clone().oneshot(request()).await.expect("infallible");
+    assert_eq!(up.status(), StatusCode::OK, "database and bus are up");
+    assert!(
+        body_string(&mut up).await.contains("\"bus\""),
+        "the bus check is named once it is registered"
+    );
+
+    state.set_bus_ready(false);
+    let mut down = router.oneshot(request()).await.expect("infallible");
+    assert_eq!(
+        down.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "a stopped bus task is not ready"
+    );
+    let body = body_string(&mut down).await;
+    assert!(
+        body.contains("not_ready") && body.contains("\"bus\""),
+        "{body}"
+    );
+}

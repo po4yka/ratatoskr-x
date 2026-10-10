@@ -12,15 +12,19 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
-use ratatoskr_event_envelope::CommandEnvelope;
+use ratatoskr_event_envelope::EventEnvelope;
 use ratatoskr_social_contracts::{RemovalReason, SocialSourceRemoved};
 use x_budget::gate::{BudgetClass, BudgetGate, Clock};
 use x_persistence::test_support::TestDatabase;
 use x_sync::{
     ComplianceAvailability, ComplianceObservation, ComplianceRevalidationService,
-    ComplianceRevalidationSource, ComplianceSourceError, ExplicitCaptureService,
-    KnowledgeAnalysisService, KnowledgeIntegrationError,
+    ComplianceRevalidationSource, ComplianceSourceError, KnowledgeAnalysisService,
+    KnowledgeIntegrationError,
 };
+
+mod support;
+
+use support::{OnePost, snapshot_service};
 
 #[derive(Debug)]
 struct FixedClock(DateTime<Utc>);
@@ -73,32 +77,6 @@ impl ComplianceRevalidationSource for FakeComplianceSource {
     }
 }
 
-fn capture_command(owner: uuid::Uuid, provider_post_id: &str, marker: u16) -> CommandEnvelope {
-    serde_json::from_value(serde_json::json!({
-        "command_id": format!("018f0000-0000-7000-8000-{marker:012x}"),
-        "command_type": "social.capture.requested.v1",
-        "issued_at": "2026-08-27T12:00:00Z",
-        "producer": "ratatoskr-platform",
-        "aggregate_id": format!("x-post:{provider_post_id}"),
-        "correlation_id": format!("operation:018f0000-0000-7000-8001-{marker:012x}"),
-        "tenant_id": format!("user:{owner}"),
-        "schema_version": 1,
-        "payload": {
-            "operation_id": format!("018f0000-0000-7000-8001-{marker:012x}"),
-            "idempotency_key": {
-                "algorithm": "sha256",
-                "hex": "1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-            },
-            "original_permalink": format!("https://x.com/author/status/{provider_post_id}"),
-            "captured_at": "2026-08-27T12:00:00Z",
-            "provider": "x",
-            "acquisition": "browser_extension",
-            "saved_authority": "explicit_user_capture"
-        }
-    }))
-    .expect("the capture command decodes")
-}
-
 async fn seed_source(test: &TestDatabase) -> (uuid::Uuid, uuid::Uuid) {
     let account = test
         .seed_account("compliance-revalidation-owner")
@@ -110,36 +88,23 @@ async fn seed_source(test: &TestDatabase) -> (uuid::Uuid, uuid::Uuid) {
             .fetch_one(test.database.pool())
             .await
             .expect("the owner is readable");
-    seed_post_source(test, account, owner, "223456789", 0x711).await;
+    seed_post_source(test, account, "223456789", 0x711).await;
     (account, owner)
 }
 
 async fn seed_post_source(
     test: &TestDatabase,
     account: uuid::Uuid,
-    owner: uuid::Uuid,
     provider_post_id: &str,
     marker: u16,
 ) {
-    let author: uuid::Uuid = sqlx::query_scalar(
-        "insert into x_archive.users (provider_id, parser_version) \
-         values ($1, 1) returning id",
-    )
-    .bind(format!("compliance-author-{marker}"))
-    .fetch_one(test.database.pool())
-    .await
-    .expect("the author seeds");
-    sqlx::query(
-        "insert into x_archive.posts (provider_id, author_user_id, text, parser_version) \
-         values ($1, $2, 'Revalidate this source.', 1)",
-    )
-    .bind(provider_post_id)
-    .bind(author)
-    .execute(test.database.pool())
-    .await
-    .expect("the post seeds");
-    ExplicitCaptureService::new(test.database.clone())
-        .apply(account, capture_command(owner, provider_post_id, marker))
+    let source = OnePost {
+        provider_id: provider_post_id.to_owned(),
+        author_id: format!("compliance-author-{marker}"),
+        text: "Revalidate this source.".to_owned(),
+    };
+    snapshot_service(test.database.clone())
+        .run(account, &source, None)
         .await
         .expect("the source is captured");
 }
@@ -268,9 +233,9 @@ async fn available_due_source_records_one_revalidation_ledger_entry() {
 #[tokio::test]
 async fn recent_and_excess_sources_are_not_checked() {
     let test = TestDatabase::create().await.expect("a disposable database");
-    let (account, owner) = seed_source(&test).await;
-    seed_post_source(&test, account, owner, "223456790", 0x712).await;
-    seed_post_source(&test, account, owner, "223456791", 0x713).await;
+    let (account, _) = seed_source(&test).await;
+    seed_post_source(&test, account, "223456790", 0x712).await;
+    seed_post_source(&test, account, "223456791", 0x713).await;
     let recent: (uuid::Uuid, uuid::Uuid) = sqlx::query_as(
         "select source.social_source_id, source.post_id \
          from x_archive.social_sources source \
@@ -442,12 +407,15 @@ async fn authoritative_deletion_records_tombstone_and_one_knowledge_deletion_req
     .fetch_all(test.database.pool())
     .await
     .expect("removal requests are readable");
-    let removal: SocialSourceRemoved = serde_json::from_value(
+    let removal: SocialSourceRemoved = EventEnvelope::from_json(
         removal_payloads
             .first()
-            .cloned()
-            .expect("one deletion request is emitted"),
+            .expect("one deletion request is emitted")
+            .to_string()
+            .as_bytes(),
     )
+    .expect("the deletion request is a complete event envelope")
+    .payload_as()
     .expect("the deletion request uses the shared contract");
 
     test.cleanup().await.expect("cleanup drops the database");
@@ -469,18 +437,70 @@ async fn authoritative_deletion_records_tombstone_and_one_knowledge_deletion_req
 }
 
 #[tokio::test]
+async fn compliance_removal_row_is_a_complete_event_envelope() {
+    let test = TestDatabase::create().await.expect("a disposable database");
+    let (account, owner) = seed_source(&test).await;
+    let source = FakeComplianceSource::one(Ok(ComplianceObservation {
+        availability: ComplianceAvailability::Deleted,
+        provider_request_id: None,
+    }));
+    service(test.database.clone())
+        .run_due(
+            account,
+            &source,
+            "2026-08-27T12:00:00Z"
+                .parse()
+                .expect("the due instant parses"),
+            1,
+        )
+        .await
+        .expect("the authoritative takedown is processed");
+
+    let row: (uuid::Uuid, String, serde_json::Value) = sqlx::query_as(
+        "select id, aggregate, payload from x_archive.outbox_events \
+         where event_type = 'social.source.removed.v1'",
+    )
+    .fetch_one(test.database.pool())
+    .await
+    .expect("one removal row is stored");
+    test.cleanup().await.expect("cleanup drops the database");
+
+    let (row_id, aggregate, payload) = row;
+    let envelope = EventEnvelope::from_json(payload.to_string().as_bytes())
+        .expect("the stored payload is a complete event envelope");
+    assert_eq!(envelope.event_id.0, row_id, "the row id is the event id");
+    assert_eq!(envelope.producer.as_str(), "ratatoskr-x");
+    assert_eq!(
+        envelope.tenant_id.map(|tenant| tenant.to_string()),
+        Some(format!("user:{owner}"))
+    );
+    assert_eq!(envelope.aggregate_id.to_wire(), aggregate);
+    assert!(
+        envelope
+            .causation_id
+            .as_ref()
+            .is_some_and(|cause| cause.to_wire().starts_with("compliance_revalidation:")),
+        "the removal traces back to the revalidation that caused it"
+    );
+    let removed: SocialSourceRemoved = envelope
+        .payload_as()
+        .expect("the envelope payload is the removal contract");
+    assert_eq!(removed.reason, RemovalReason::RetentionPolicy);
+    assert_eq!(removed.owner.to_string(), format!("user:{owner}"));
+}
+
+#[tokio::test]
 async fn repeated_takedown_and_delayed_work_cannot_resurrect_source() {
     let test = TestDatabase::create().await.expect("a disposable database");
     let (account, owner) = seed_source(&test).await;
-    let (source_id, original_digest, post_id): (uuid::Uuid, serde_json::Value, uuid::Uuid) =
-        sqlx::query_as(
-            "select social_source_id, current_content_digest, post_id \
-             from x_archive.social_sources where account_id = $1",
-        )
-        .bind(account)
-        .fetch_one(test.database.pool())
-        .await
-        .expect("the retained source is readable");
+    let (source_id, original_digest): (uuid::Uuid, serde_json::Value) = sqlx::query_as(
+        "select social_source_id, current_content_digest \
+         from x_archive.social_sources where account_id = $1",
+    )
+    .bind(account)
+    .fetch_one(test.database.pool())
+    .await
+    .expect("the retained source is readable");
     let deleted = FakeComplianceSource::one(Ok(ComplianceObservation {
         availability: ComplianceAvailability::Deleted,
         provider_request_id: Some("x-request-deleted-first".to_owned()),
@@ -512,13 +532,13 @@ async fn repeated_takedown_and_delayed_work_cannot_resurrect_source() {
         .await
         .expect("a repeated schedule is idempotent");
 
-    sqlx::query("update x_archive.posts set text = 'Delayed stale source body.' where id = $1")
-        .bind(post_id)
-        .execute(test.database.pool())
-        .await
-        .expect("the delayed normalized observation seeds");
-    ExplicitCaptureService::new(test.database.clone())
-        .apply(account, capture_command(owner, "223456789", 0x714))
+    let stale = OnePost {
+        provider_id: "223456789".to_owned(),
+        author_id: "compliance-author-1809".to_owned(),
+        text: "Delayed stale source body.".to_owned(),
+    };
+    snapshot_service(test.database.clone())
+        .run(account, &stale, None)
         .await
         .expect("the delayed ordinary observation is safely consumed");
     let completion = completion_event(owner, source_id, &original_digest);

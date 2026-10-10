@@ -2,20 +2,37 @@
 
 use std::future::Future;
 
+use std::time::Duration;
+
 use async_nats::jetstream;
+use async_nats::jetstream::consumer::pull::MessagesErrorKind;
+use chrono::{DateTime, Utc};
 use futures_util::StreamExt as _;
 use ratatoskr_event_envelope::CommandEnvelope;
+use ratatoskr_identifiers::{CommandId, EntityRef, EventId, OperationId, UserId};
+use ratatoskr_operation_contracts::OperationReported;
 use ratatoskr_social_contracts::{
     AcquisitionMethod, SavedAuthority, SocialCaptureProvider, SocialCaptureRequested,
+    SocialContractError, SourceUnavailability, queued_report, report_envelope, unavailable_report,
 };
 use x_persistence::database::Database;
+use x_persistence::outbox::{OutboxError, enqueue_event};
+
+pub mod relay;
+
+/// The producer name every X operation report carries.
+const REPORT_PRODUCER: &str = "ratatoskr-x";
+
+/// Pause after a recoverable stream error, so a broken connection cannot spin the loop.
+const RETRY_PAUSE: Duration = Duration::from_secs(1);
 
 /// The only `JetStream` subject the X browser-capture consumer may receive.
 pub const COMMAND_SUBJECT: &str = "cmd.x.capture.requested.v1";
 
 /// Validates one Platform command before the X persistence boundary.
 ///
-/// The implementation is added through the red-green test cycle.
+/// A command without a tenant names no owner, so it is a poison command: the explicit lane is
+/// owner-scoped and has nobody to attribute the capture to.
 ///
 /// # Errors
 ///
@@ -32,7 +49,44 @@ pub fn validate_browser_capture(command: &CommandEnvelope) -> Result<(), Capture
     {
         return Err(CaptureCommandError::InvalidProvenance);
     }
+    if command.tenant_id.is_none() {
+        return Err(CaptureCommandError::MissingTenant);
+    }
     Ok(())
+}
+
+/// The hosts whose status permalinks Platform accepts for X.
+const STATUS_HOSTS: [&str; 6] = [
+    "x.com",
+    "www.x.com",
+    "mobile.x.com",
+    "twitter.com",
+    "www.twitter.com",
+    "mobile.twitter.com",
+];
+
+/// The status id a permalink names, when it is a status permalink on one of the six hosts
+/// Platform accepts (`x.com`, `twitter.com` and their `www.` and `mobile.` forms).
+///
+/// The id is returned only when it is 1 to 19 decimal digits, the range the schema admits.
+#[must_use]
+pub fn status_id_from_permalink(permalink: &str) -> Option<&str> {
+    let (scheme, rest) = permalink.split_once("://")?;
+    if !scheme.eq_ignore_ascii_case("https") && !scheme.eq_ignore_ascii_case("http") {
+        return None;
+    }
+    let (host, path) = rest.split_once('/')?;
+    if !STATUS_HOSTS
+        .iter()
+        .any(|allowed| allowed.eq_ignore_ascii_case(host))
+    {
+        return None;
+    }
+    let path = path.split(['?', '#']).next()?;
+    let mut segments = path.split('/');
+    segments.find(|segment| matches!(*segment, "status" | "statuses"))?;
+    let id = segments.next()?;
+    (matches!(id.len(), 1..=19) && id.bytes().all(|byte| byte.is_ascii_digit())).then_some(id)
 }
 
 /// Whether a command delivery produced a new explicit capture or was already durable.
@@ -46,7 +100,9 @@ pub enum Delivery {
 
 /// Persists an X browser capture with the command delivery as its durable deduplication key.
 ///
-/// The transaction-backed implementation follows the red-green test cycle.
+/// In one transaction this claims the inbox row, stores the owner-scoped capture and queues the
+/// operation report: `queued` for a capture the resolution worker will pick up, or a terminal
+/// `failed` report for a permalink that names no status (so the operation never hangs).
 ///
 /// # Errors
 ///
@@ -60,11 +116,79 @@ pub async fn persist_browser_capture(
     let capture = command
         .payload_as::<SocialCaptureRequested>()
         .map_err(|_| CaptureCommandError::InvalidPayload)?;
+    let owner = command
+        .tenant_id
+        .ok_or(CaptureCommandError::MissingTenant)?
+        .user_id();
+    let captured_at: DateTime<Utc> = capture
+        .captured_at
+        .to_wire()
+        .parse()
+        .map_err(|_| DeliveryError::InvalidTimestamp)?;
     let mut transaction = database
         .pool()
         .begin()
         .await
         .map_err(DeliveryError::Persistence)?;
+    if !claim_inbox(&mut transaction, command).await? {
+        transaction
+            .rollback()
+            .await
+            .map_err(DeliveryError::Persistence)?;
+        return Ok(Delivery::Duplicate);
+    }
+
+    let capture_id = uuid::Uuid::now_v7();
+    let provider_post_id = status_id_from_permalink(capture.original_permalink.as_str());
+    let report = match provider_post_id {
+        Some(_) => queued_report(capture.operation_id)?,
+        None => unavailable_report(capture.operation_id, SourceUnavailability::Inaccessible)?,
+    };
+    sqlx::query(
+        "insert into x_archive.explicit_captures \
+         (capture_id, command_id, operation_id, owner, provider_post_id, original_permalink, \
+          captured_at, acquisition, saved_authority, status, reported_at) \
+         values ($1, $2, $3, $4, $5, $6, $7, 'browser_extension', 'explicit_user_capture', $8, \
+                 case when $5::text is null then now() end)",
+    )
+    .bind(capture_id)
+    .bind(command.command_id.to_string())
+    .bind(capture.operation_id.0)
+    .bind(owner.0)
+    .bind(provider_post_id)
+    .bind(capture.original_permalink.as_str())
+    .bind(captured_at)
+    .bind(if provider_post_id.is_some() {
+        "accepted"
+    } else {
+        "unavailable"
+    })
+    .execute(&mut *transaction)
+    .await
+    .map_err(DeliveryError::Persistence)?;
+    queue_report(
+        &mut transaction,
+        ReportFacts {
+            owner,
+            operation: capture.operation_id,
+            capture_id,
+            command_id: command.command_id,
+        },
+        &report,
+    )
+    .await?;
+    transaction
+        .commit()
+        .await
+        .map_err(DeliveryError::Persistence)?;
+    Ok(Delivery::Applied)
+}
+
+/// Claims the command delivery in the inbox; `false` means an earlier delivery already did.
+async fn claim_inbox(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    command: &CommandEnvelope,
+) -> Result<bool, DeliveryError> {
     let claimed: Option<(uuid::Uuid,)> = sqlx::query_as(
         "insert into x_archive.inbox_events (source, event_type, event_id, payload, consumed_at) \
          values ('platform', $1, $2, $3, now()) \
@@ -73,34 +197,39 @@ pub async fn persist_browser_capture(
     .bind(command.command_type.to_wire())
     .bind(command.command_id.to_string())
     .bind(serde_json::to_value(command).map_err(DeliveryError::Serialize)?)
-    .fetch_optional(&mut *transaction)
+    .fetch_optional(&mut **transaction)
     .await
     .map_err(DeliveryError::Persistence)?;
-    if claimed.is_none() {
-        transaction
-            .rollback()
-            .await
-            .map_err(DeliveryError::Persistence)?;
-        return Ok(Delivery::Duplicate);
-    }
-    sqlx::query(
-        "insert into x_archive.explicit_captures \
-         (capture_id, command_id, operation_id, original_permalink, captured_at, acquisition, saved_authority) \
-         values ($1, $2, $3, $4, $5, 'browser_extension', 'explicit_user_capture')",
-    )
-    .bind(uuid::Uuid::now_v7())
-    .bind(command.command_id.to_string())
-    .bind(capture.operation_id.to_string())
-    .bind(capture.original_permalink.as_str())
-    .bind(capture.captured_at.to_wire().parse::<chrono::DateTime<chrono::Utc>>().map_err(|_| DeliveryError::InvalidTimestamp)?)
-    .execute(&mut *transaction)
-    .await
-    .map_err(DeliveryError::Persistence)?;
-    transaction
-        .commit()
-        .await
-        .map_err(DeliveryError::Persistence)?;
-    Ok(Delivery::Applied)
+    Ok(claimed.is_some())
+}
+
+/// What identifies the operation report of one capture.
+struct ReportFacts {
+    owner: UserId,
+    operation: OperationId,
+    capture_id: uuid::Uuid,
+    command_id: CommandId,
+}
+
+/// Queues the complete `platform.operation.reported.v1` envelope for `report`.
+async fn queue_report(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    facts: ReportFacts,
+    report: &OperationReported,
+) -> Result<(), DeliveryError> {
+    let aggregate = EntityRef::parse(&format!("capture:{}", facts.capture_id))
+        .map_err(|_| DeliveryError::InvalidIdentifier)?;
+    let envelope = report_envelope(
+        REPORT_PRODUCER,
+        facts.owner,
+        facts.operation,
+        aggregate,
+        facts.command_id,
+        EventId::new_v7(),
+        report,
+    )?;
+    enqueue_event(transaction, &envelope).await?;
+    Ok(())
 }
 
 /// Why a browser social-capture command cannot enter the X bounded context.
@@ -116,6 +245,9 @@ pub enum CaptureCommandError {
     /// The command does not belong to X.
     #[error("the social capture command is not owned by X")]
     WrongProvider,
+    /// The command names no tenant, so no owner can be attributed.
+    #[error("the social capture command names no tenant")]
+    MissingTenant,
 }
 
 /// Why a command could not be durably accepted by the X owner.
@@ -134,6 +266,15 @@ pub enum DeliveryError {
     /// A contract timestamp failed conversion to the database representation.
     #[error("the X browser capture timestamp is invalid")]
     InvalidTimestamp,
+    /// A locally minted identifier failed its contract grammar.
+    #[error("the X browser capture identifier is invalid")]
+    InvalidIdentifier,
+    /// The operation report could not be built.
+    #[error("the X browser capture report cannot be built")]
+    Report(#[from] SocialContractError),
+    /// The operation report could not be queued.
+    #[error("the X browser capture report cannot be queued")]
+    Outbox(#[from] OutboxError),
 }
 
 /// Totals from one live `JetStream` consumer session.
@@ -156,7 +297,8 @@ pub struct ConsumerReport {
 ///
 /// # Errors
 ///
-/// Returns an error when `JetStream` cannot open the declared command stream or durable consumer.
+/// Returns an error when `JetStream` cannot open the declared command stream or durable consumer,
+/// when the durable is deleted, or when the message stream ends without a shutdown request.
 pub async fn consume_browser_commands(
     context: &jetstream::Context,
     database: &Database,
@@ -175,13 +317,31 @@ pub async fn consume_browser_commands(
     loop {
         let message = tokio::select! {
             biased;
-            () = &mut shutdown => break,
+            () = &mut shutdown => return Ok(report),
             next = messages.next() => next,
         };
-        let Some(message) = message else { break };
-        let Ok(message) = message else {
-            report.rejected += 1;
-            continue;
+        // The stream ending without a shutdown request means the consumer is gone: the caller
+        // must see that as a fault instead of a quiet success.
+        let Some(message) = message else {
+            return Err(ConsumerError::Stopped);
+        };
+        let message = match message {
+            Ok(message) => message,
+            Err(error) => {
+                if matches!(
+                    error.kind(),
+                    MessagesErrorKind::ConsumerDeleted | MessagesErrorKind::PushBasedConsumer
+                ) {
+                    return Err(ConsumerError::Bus(error.to_string()));
+                }
+                tracing::warn!(%error, "the social capture stream reported a recoverable error");
+                tokio::select! {
+                    biased;
+                    () = &mut shutdown => return Ok(report),
+                    () = tokio::time::sleep(RETRY_PAUSE) => {}
+                }
+                continue;
+            }
         };
         let disposition = match CommandEnvelope::from_json(&message.payload) {
             Ok(command) => persist_browser_capture(database, &command).await,
@@ -207,7 +367,6 @@ pub async fn consume_browser_commands(
             }
         }
     }
-    Ok(report)
 }
 
 /// Opens the Platform-preprovisioned X durable pull consumer before the service reports readiness.
@@ -264,4 +423,7 @@ pub enum ConsumerError {
     /// `JetStream` refused the stream or durable-consumer operation.
     #[error("the X browser-capture consumer cannot use JetStream: {0}")]
     Bus(String),
+    /// The message stream ended without a shutdown request.
+    #[error("the X browser-capture consumer stopped without a shutdown request")]
+    Stopped,
 }

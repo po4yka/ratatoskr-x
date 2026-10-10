@@ -5,13 +5,14 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use ratatoskr_event_envelope::EventPayload;
 use ratatoskr_social_contracts::SocialSourceRemoved;
 use serde_json::json;
 use sqlx::types::Uuid;
 
 use x_budget::gate::{BudgetError, BudgetGate, Clock};
 use x_persistence::database::Database;
+
+use crate::envelopes::{EnvelopeFacts, QueueError, entity, queue_event, wire_timestamp};
 
 /// An authoritative provider observation for one preserved post.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -307,27 +308,26 @@ async fn remove_source(
     .execute(&mut **transaction)
     .await
     .map_err(ComplianceRevalidationError::Query)?;
-    let payload: SocialSourceRemoved = serde_json::from_value(json!({
+    let removed: SocialSourceRemoved = serde_json::from_value(json!({
         "social_source_id": candidate.source,
         "owner": format!("user:{}", candidate.owner),
         "reason": "retention_policy",
-        "removed_at": checked_at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+        "removed_at": wire_timestamp(checked_at),
     }))
     .map_err(ComplianceRevalidationError::Contract)?;
-    let payload = serde_json::to_value(payload).map_err(ComplianceRevalidationError::Contract)?;
-    sqlx::query(
-        "insert into x_archive.outbox_events \
-           (aggregate, event_type, payload, correlation_id, causation_id) \
-         values ($1, $2, $3, $4, $5)",
+    let aggregate = entity("social_source", candidate.source)?;
+    queue_event(
+        transaction,
+        EnvelopeFacts {
+            correlation: aggregate.clone(),
+            aggregate,
+            causation: Some(entity("compliance_revalidation", revalidation_id)?),
+            owner: candidate.owner,
+            occurred_at: checked_at,
+        },
+        &removed,
     )
-    .bind(format!("social_source:{}", candidate.source))
-    .bind(SocialSourceRemoved::EVENT_TYPE)
-    .bind(payload)
-    .bind(format!("social_source:{}", candidate.source))
-    .bind(format!("compliance_revalidation:{revalidation_id}"))
-    .execute(&mut **transaction)
-    .await
-    .map_err(ComplianceRevalidationError::Query)?;
+    .await?;
     Ok(true)
 }
 
@@ -373,4 +373,7 @@ pub enum ComplianceRevalidationError {
     /// The shared removal contract could not represent takedown evidence.
     #[error("the compliance takedown payload is invalid")]
     Contract(#[source] serde_json::Error),
+    /// The removal envelope could not be built or queued.
+    #[error(transparent)]
+    Queue(#[from] QueueError),
 }

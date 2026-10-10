@@ -2,10 +2,17 @@
 
 use std::collections::HashSet;
 
+use chrono::Utc;
+use ratatoskr_document_contracts::{CaptureUrl, ContentCaptureRequested};
 use ratatoskr_event_envelope::{EventEnvelope, EventPayload as _};
+use ratatoskr_identifiers::{ContentDigest, DigestAlgorithm, DigestHex, Extensions, OperationId};
 use ratatoskr_operation_contracts::{OperationReported, OperationStatus};
+use sha2::{Digest as _, Sha256};
 use sqlx::types::Uuid;
 use x_persistence::database::Database;
+
+use crate::envelopes::{EnvelopeFacts, QueueError, entity, queue_command};
+use crate::social_sources::lower_hex;
 
 /// A selected external URL together with its conservative canonical form.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,8 +53,7 @@ impl ArticleCaptureService {
             .await
             .map_err(ArticleCaptureError::Query)?;
         capture_expanded_links_in_transaction(&mut transaction, account_id, social_source_id, urls)
-            .await
-            .map_err(ArticleCaptureError::Query)?;
+            .await?;
         transaction
             .commit()
             .await
@@ -111,7 +117,7 @@ pub(crate) async fn capture_expanded_links_in_transaction(
     account_id: Uuid,
     social_source_id: Uuid,
     urls: &[String],
-) -> Result<(), sqlx::Error> {
+) -> Result<(), ArticleCaptureError> {
     let selected = select_external_expanded_urls(urls);
     if selected.is_empty() {
         return Ok(());
@@ -125,22 +131,28 @@ pub(crate) async fn capture_expanded_links_in_transaction(
     .bind(social_source_id)
     .bind(account_id)
     .fetch_one(&mut **transaction)
-    .await?;
+    .await
+    .map_err(ArticleCaptureError::Query)?;
 
     for selected_url in selected {
+        // A URL the capture contract cannot carry (longer than 2048 characters) can never be
+        // extracted, so it never becomes a capture row either.
+        let Ok(url) = CaptureUrl::parse(&selected_url.normalized_url) else {
+            continue;
+        };
         let capture_id = Uuid::now_v7();
         let correlation_id = format!("article_capture:{capture_id}");
-        let capture: (Uuid, String, bool) = sqlx::query_as(
+        let capture: (Uuid, bool) = sqlx::query_as(
             "with inserted as ( \
                    insert into x_archive.article_captures \
                      (id, account_id, normalized_url, original_url, correlation_id) \
                    values ($1, $2, $3, $4, $5) \
                    on conflict (account_id, normalized_url) do nothing \
-                   returning id, correlation_id, true as created \
+                   returning id, true as created \
                  ) \
-                 select id, correlation_id, created from inserted \
+                 select id, created from inserted \
                  union all \
-                 select id, correlation_id, false as created \
+                 select id, false as created \
                    from x_archive.article_captures \
                   where account_id = $2 and normalized_url = $3 \
                  limit 1",
@@ -151,8 +163,9 @@ pub(crate) async fn capture_expanded_links_in_transaction(
         .bind(&selected_url.original_url)
         .bind(correlation_id)
         .fetch_one(&mut **transaction)
-        .await?;
-        let (capture_id, correlation_id, created) = capture;
+        .await
+        .map_err(ArticleCaptureError::Query)?;
+        let (capture_id, created) = capture;
 
         sqlx::query(
             "insert into x_archive.post_article_links (social_source_id, article_capture_id) \
@@ -161,33 +174,44 @@ pub(crate) async fn capture_expanded_links_in_transaction(
         .bind(social_source_id)
         .bind(capture_id)
         .execute(&mut **transaction)
-        .await?;
+        .await
+        .map_err(ArticleCaptureError::Query)?;
 
         if created {
-            let command = serde_json::json!({
-                "command_id": Uuid::now_v7(),
-                "command_type": "content.capture.requested.v1",
-                "requested_at": ratatoskr_identifiers::WireTimestamp::now(),
-                "operation_id": capture_id,
-                "tenant_id": format!("user:{owner_id}"),
-                "correlation_id": correlation_id,
-                "idempotency_key": capture_id.to_string(),
-                "payload": { "url": selected_url.normalized_url },
-            });
-            sqlx::query(
-                "insert into x_archive.outbox_events \
-                     (aggregate, event_type, payload, correlation_id, causation_id) \
-                     values ($1, 'content.capture.requested.v1', $2::jsonb, $3, $4)",
-            )
-            .bind(format!("article_capture:{capture_id}"))
-            .bind(command.to_string())
-            .bind(&correlation_id)
-            .bind(format!("social_source:{social_source_id}"))
-            .execute(&mut **transaction)
-            .await?;
+            queue_article_command(transaction, owner_id, social_source_id, capture_id, url).await?;
         }
     }
 
+    Ok(())
+}
+
+/// Queues the complete `content.capture.requested.v1` command envelope of one new article capture.
+async fn queue_article_command(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    owner: Uuid,
+    social_source_id: Uuid,
+    capture_id: Uuid,
+    url: CaptureUrl,
+) -> Result<(), QueueError> {
+    let digest = Sha256::digest(capture_id.to_string().as_bytes());
+    let payload = ContentCaptureRequested {
+        operation_id: OperationId(capture_id),
+        idempotency_key: ContentDigest {
+            algorithm: DigestAlgorithm::Sha256,
+            hex: DigestHex::parse(&lower_hex(&digest))?,
+        },
+        url: Some(url),
+        blob: None,
+        extensions: Extensions::new(),
+    };
+    let facts = EnvelopeFacts {
+        aggregate: entity("operation", capture_id)?,
+        correlation: entity("article_capture", capture_id)?,
+        causation: Some(entity("social_source", social_source_id)?),
+        owner,
+        occurred_at: Utc::now(),
+    };
+    queue_command(transaction, facts, &payload).await?;
     Ok(())
 }
 
@@ -315,6 +339,9 @@ pub enum ArticleCaptureError {
     /// A database query failed.
     #[error("the article capture query failed")]
     Query(#[source] sqlx::Error),
+    /// The extractor command could not be built or queued.
+    #[error(transparent)]
+    Queue(#[from] QueueError),
 }
 
 /// Selects unique external HTTP(S) links from already expanded provider entities.

@@ -13,6 +13,7 @@ path = "src/lib.rs"
 
 [dependencies]
 chrono.workspace                    = true
+metrics.workspace                   = true
 ratatoskr-document-contracts.workspace = true
 ratatoskr-event-envelope.workspace  = true
 ratatoskr-identifiers.workspace     = true
@@ -29,9 +30,11 @@ sha2.workspace                      = true
 sqlx.workspace                      = true
 thiserror.workspace                 = true
 tokio = { workspace = true, features = ["sync"] }
+tracing.workspace                   = true
 uuid.workspace                      = true
 
 [dev-dependencies]
+metrics-exporter-prometheus.workspace = true
 ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
 wiremock.workspace = true
 
