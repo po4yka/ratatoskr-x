@@ -51,3 +51,11 @@
 
 - [x] 11.1 Update `README.md`, `docs/ARCHITECTURE.md` and `DEVELOPMENT.md`; documentation has no meaningful RED.
 - [x] 11.2 Run the full local gate (`cargo fmt`, `cargo clippy`, the 850-line check, `cargo test --workspace --locked`, `cargo deny --locked check`, `openspec validate --all --strict`, `openspec validate --archived`).
+
+## 12. Review fixes
+
+- [x] 12.1 Add `crates/x-sync/tests/public_capture/outcomes.rs` cases for a resolved post with empty text, a control character in the text, a handle outside the grammar and a control character in the display name; run them RED, `run_due_once` returns `Err(Snapshot(Contract))`, the capture stays `accepted` and the service would exit.
+- [x] 12.2 End such a capture `unavailable` with one terminal `failed` report (`Inaccessible`) inside `run_due_once`, and keep `Err` for database and infrastructure errors, so the cases pass and the rest of the batch is still served.
+- [x] 12.3 Add `a_plan_problem_and_a_request_timeout_are_transient` to `crates/x-sync/tests/public_post.rs`; run it RED, 402 and 408 are classified `Inaccessible`. Map 402 and 408 to `Transient` and log the transport class of a failed request so it passes; the log lines have no meaningful RED.
+- [x] 12.4 Add `a_command_without_a_tenant_is_terminated_not_acknowledged` to `crates/x-capture/tests/nats_consumer.rs`; run it RED, no `MSG_TERMINATED` advisory arrives because the consumer acknowledges the poison command. Terminate permanent rejections and `Nak` transient failures with a delay so it passes, and log each failed relay publish (no meaningful RED).
+- [x] 12.5 Record the CD6 nullable `provider_post_id`, the relay pass-stops-at-first-failure behaviour, the stale `queued` report consumers must ignore and the Term/Nak policy in `design.md`, the `x-archive-schema` delta and `README.md`; documentation has no meaningful RED.

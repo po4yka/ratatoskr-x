@@ -30,7 +30,7 @@ Article captures SHALL preserve the normalized URL, operation and correlation id
 terminal state, and optional Document identity and Document IR BlobRef. Post article links SHALL
 permit several posts to reference one account article capture. Explicit captures SHALL retain the
 accepted command and operation identity, the owning user taken from the command tenant, the provider
-post id, original permalink, captured instant, explicit browser provenance, a bounded retry ledger,
+post id (nullable only for a row that is `unavailable` because its permalink names no status), original permalink, captured instant, explicit browser provenance, a bounded retry ledger,
 and a once-only terminal-report marker without claiming a native X bookmark. Explicit sources SHALL
 be keyed by owner and provider post id and SHALL hold only what the public call returned for that
 owner. Outbox rows SHALL be keyed by the envelope id, carry only the five publishable event types,
