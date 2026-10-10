@@ -37,10 +37,27 @@ fn unknown_environment_key_is_refused() {
 #[test]
 fn absent_variables_yield_documented_defaults() {
     let config = XConfig::extract_from(&figment_with(&[])).expect("defaults must load");
-    assert_eq!(config.admin.listen_addr, "127.0.0.1:8080");
+    assert_eq!(config.admin.listen_addr, "127.0.0.1:9087");
     assert_eq!(config.database.max_connections, 5);
     assert_eq!(config.telemetry.log_format, LogFormat::Json);
     assert_eq!(config.telemetry.log_filter, "info");
+}
+
+/// Edge owns the public `8080` listener; the X operator listener is a host-only allocation of its own
+/// (XR-021 CONTRACTS.md S05), so the two defaults must never collide.
+#[test]
+fn operator_listener_default_differs_from_the_edge_public_port() {
+    let config = XConfig::extract_from(&figment_with(&[])).expect("defaults must load");
+    let address: std::net::SocketAddr = config
+        .admin
+        .listen_addr
+        .parse()
+        .expect("the default listener is a socket address");
+    assert_ne!(address.port(), 8080, "8080 is the Edge public port");
+    assert!(
+        address.ip().is_loopback(),
+        "operator listeners are loopback"
+    );
 }
 
 #[test]
@@ -164,5 +181,97 @@ fn secret_key_debug_rendering_redacts_material() {
     assert!(
         !rendered.contains(marker),
         "the debug rendering must never contain the raw material"
+    );
+}
+
+#[test]
+fn public_capture_section_loads_with_the_documented_defaults() {
+    let config = XConfig::extract_from(&figment_with(&[])).expect("defaults must load");
+    assert_eq!(config.public_capture.api_base_url, "https://api.x.com");
+    assert!(
+        config.public_capture.bearer_token_path.is_none(),
+        "no credential path may exist by default"
+    );
+    assert_eq!(config.public_capture.max_attempts, 5);
+    assert_eq!(config.public_capture.batch_size, 8);
+    assert_eq!(config.public_capture.poll_interval_seconds, 2);
+    assert_eq!(config.bus.events_stream_name, "ratatoskr_events");
+}
+
+#[test]
+fn public_capture_requires_an_https_endpoint_and_an_absolute_token_path() {
+    let figment = figment_with(&[
+        (
+            "public_capture.api_base_url",
+            Value::from("http://api.x.com"),
+        ),
+        (
+            "public_capture.bearer_token_path",
+            Value::from("relative/token"),
+        ),
+    ]);
+    let error = XConfig::extract_from(&figment)
+        .expect_err("a plain-http endpoint and a relative token path must be refused");
+    let ConfigError::Invalid { violations } = error else {
+        panic!("a semantic rejection must be Invalid");
+    };
+    assert_eq!(violations.len(), 2, "both unsafe settings are reported");
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation.message.contains("public_capture.api_base_url")),
+        "{violations}"
+    );
+    assert!(
+        violations.iter().any(|violation| violation
+            .message
+            .contains("public_capture.bearer_token_path")),
+        "{violations}"
+    );
+}
+
+#[test]
+fn public_capture_counters_must_be_positive() {
+    let figment = figment_with(&[
+        ("public_capture.max_attempts", Value::from(0_u32)),
+        ("public_capture.batch_size", Value::from(0_u32)),
+        ("public_capture.poll_interval_seconds", Value::from(0_u64)),
+    ]);
+    let error = XConfig::extract_from(&figment).expect_err("zero-valued counters must be refused");
+    let ConfigError::Invalid { violations } = error else {
+        panic!("a semantic rejection must be Invalid");
+    };
+    assert_eq!(violations.len(), 3, "{violations}");
+}
+
+#[test]
+fn public_capture_unknown_keys_are_still_refused() {
+    let figment = figment_with(&[("public_capture.bogus", Value::from("1"))]);
+    let error = XConfig::extract_from(&figment).expect_err("an undeclared key must be refused");
+    assert!(error.report().contains("bogus"), "{}", error.report());
+}
+
+#[test]
+fn a_configured_bus_requires_the_bearer_token_path() {
+    let without = XConfig::extract_from(&figment_with(&[])).expect("defaults must load");
+    let error = without
+        .require_public_capture_token_path()
+        .expect_err("a bus without the public-capture credential cannot complete work");
+    assert_eq!(error.exit_code(), 78, "EX_CONFIG");
+    assert!(
+        error.report().contains("public_capture.bearer_token_path"),
+        "{}",
+        error.report()
+    );
+
+    let with = XConfig::extract_from(&figment_with(&[(
+        "public_capture.bearer_token_path",
+        Value::from("/run/secrets/ratatoskr-x-bearer"),
+    )]))
+    .expect("an absolute token path loads");
+    assert_eq!(
+        with.require_public_capture_token_path()
+            .expect("the path is present"),
+        "/run/secrets/ratatoskr-x-bearer"
     );
 }

@@ -30,6 +30,27 @@ pub struct XConfig {
     pub budgets: BudgetsConfig,
     /// `JetStream` command-consumer configuration.
     pub bus: BusConfig,
+    /// Public, app-only resolution of explicitly captured posts.
+    pub public_capture: PublicCaptureConfig,
+}
+
+/// Public, app-only resolution of explicitly captured posts (XR-021 CONTRACTS.md S10 CD5).
+///
+/// The credential is an app-only bearer token read from a file at startup. It never appears in an
+/// environment value, a URL or a log line.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicCaptureConfig {
+    /// Base URL of the X API; `https` only.
+    pub api_base_url: String,
+    /// Absolute path of the app-only bearer token file; required wherever the bus is configured.
+    pub bearer_token_path: Option<String>,
+    /// Resolution attempts before a transient failure becomes terminal.
+    pub max_attempts: u32,
+    /// Captures claimed per worker pass.
+    pub batch_size: u32,
+    /// Seconds between worker passes.
+    pub poll_interval_seconds: u64,
 }
 
 /// Credential-protection settings.
@@ -115,13 +136,16 @@ pub struct BusConfig {
     pub stream_name: String,
     /// Stable durable name for the X browser-capture pull consumer.
     pub consumer_name: String,
+    /// Platform-owned `JetStream` stream containing event subjects.
+    pub events_stream_name: String,
 }
 
 /// Admin listener settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminConfig {
-    /// Socket address such as `127.0.0.1:8080` the admin listener binds.
+    /// Socket address such as `127.0.0.1:9087` the admin listener binds (host-only; `8080` belongs
+    /// to the Edge public API).
     pub listen_addr: String,
 }
 
@@ -159,7 +183,7 @@ impl Default for XConfig {
     fn default() -> Self {
         Self {
             admin: AdminConfig {
-                listen_addr: "127.0.0.1:8080".to_owned(),
+                listen_addr: "127.0.0.1:9087".to_owned(),
             },
             database: DatabaseConfig {
                 url: "postgres://x:x@127.0.0.1:5432/x".to_owned(),
@@ -196,12 +220,42 @@ impl Default for XConfig {
                 nkey_seed_path: "/run/secrets/ratatoskr-x-nats.nkey".to_owned(),
                 stream_name: "ratatoskr_commands".to_owned(),
                 consumer_name: "ratatoskr_x_browser_capture".to_owned(),
+                events_stream_name: "ratatoskr_events".to_owned(),
+            },
+            public_capture: PublicCaptureConfig {
+                api_base_url: "https://api.x.com".to_owned(),
+                bearer_token_path: None,
+                max_attempts: 5,
+                batch_size: 8,
+                poll_interval_seconds: 2,
             },
         }
     }
 }
 
 impl XConfig {
+    /// The absolute bearer-token path the public-capture worker needs.
+    ///
+    /// The service always runs a broker consumer, and a consumer without the surface that
+    /// finishes its work would report ready while every capture stays queued (CONTRACTS.md S02
+    /// rule 5), so the service refuses to start without the credential.
+    ///
+    /// # Errors
+    /// [`ConfigError::Invalid`] when `public_capture.bearer_token_path` is not configured.
+    pub fn require_public_capture_token_path(&self) -> Result<&str, ConfigError> {
+        self.public_capture
+            .bearer_token_path
+            .as_deref()
+            .ok_or_else(|| {
+                let mut violations = Violations::default();
+                violations.push(
+                    "public_capture.bearer_token_path is required when the bus is configured: \
+                 explicit captures cannot be resolved without the app-only credential",
+                );
+                ConfigError::Invalid { violations }
+            })
+    }
+
     /// Extracts the configuration from an already-built figment and validates it.
     ///
     /// # Errors
@@ -240,7 +294,7 @@ fn validate(config: &XConfig) -> Violations {
         .parse::<std::net::SocketAddr>()
         .is_err()
     {
-        violations.push("admin.listen_addr must be a socket address such as 127.0.0.1:8080");
+        violations.push("admin.listen_addr must be a socket address such as 127.0.0.1:9087");
     }
     if config.database.url.is_empty() {
         violations.push("database.url must not be empty");
@@ -308,5 +362,31 @@ fn validate(config: &XConfig) -> Violations {
     if config.bus.consumer_name.trim().is_empty() {
         violations.push("bus.consumer_name must not be empty");
     }
+    if config.bus.events_stream_name.trim().is_empty() {
+        violations.push("bus.events_stream_name must not be empty");
+    }
+    validate_public_capture(&config.public_capture, &mut violations);
     violations
+}
+
+fn validate_public_capture(config: &PublicCaptureConfig, violations: &mut Violations) {
+    if !config.api_base_url.starts_with("https://") {
+        violations.push("public_capture.api_base_url must be an https URL");
+    }
+    if config
+        .bearer_token_path
+        .as_ref()
+        .is_some_and(|path| !path.starts_with('/'))
+    {
+        violations.push("public_capture.bearer_token_path must be an absolute path");
+    }
+    if config.max_attempts == 0 {
+        violations.push("public_capture.max_attempts must be at least 1");
+    }
+    if config.batch_size == 0 {
+        violations.push("public_capture.batch_size must be at least 1");
+    }
+    if config.poll_interval_seconds == 0 {
+        violations.push("public_capture.poll_interval_seconds must be at least 1");
+    }
 }
