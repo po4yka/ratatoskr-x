@@ -2,7 +2,7 @@
 
 `ratatoskr-x` is the X account and bookmark archive bounded context for Ratatoskr. It authenticates a user through the official X OAuth flow, synchronizes bookmarks and bookmark folders, preserves normalized post content and media metadata, and publishes authoritative social-source events for indexing and analysis.
 
-> **Status:** the service scaffold, official OAuth connection, bookmark add/remove write-back library service and official HTTP adapter, post normalization, complete and frequent bookmark scans, native-folder authority, explicit browser-capture command consumer, normalized social-source and linked-article outbox facts, Knowledge completion linkage, and the due-driven compliance/takedown application service are implemented. Knowledge owns analysis, embeddings, and search documents; X stores only exact `(social_source_id, content_digest)` completion linkage. No external HTTP/message/UI surface invokes write-back yet; Knowledge completion/removal transport, timed compliance invocation, the compliance adapter, and legacy import are also not wired, so none is a live deployment claim.
+> **Status:** the service scaffold, official OAuth connection, bookmark add/remove write-back library service and official HTTP adapter, post normalization, complete and frequent bookmark scans, native-folder authority, the owner-scoped explicit browser-capture lane (queued intake, public app-only resolution with bounded retry, exactly-once reports), complete-envelope outbox facts relayed to JetStream, linked-article report consumption, Knowledge completion linkage, and the due-driven compliance/takedown application service are implemented. Knowledge owns analysis, embeddings, and search documents; X stores only exact `(social_source_id, content_digest)` completion linkage. No external HTTP/message/UI surface invokes write-back yet; Knowledge completion consumption, timed compliance invocation, the compliance adapter, and legacy import are also not wired, so none is a live deployment claim.
 
 > [!IMPORTANT]
 > **Ratatoskr is in development.** No database holds data that has to survive a schema change.
@@ -77,6 +77,7 @@ knowledge_analysis_links
 compliance_revalidation_ledger
 tombstones
 explicit_captures
+explicit_sources
 outbox_events
 inbox_events
 ```
@@ -274,19 +275,33 @@ Events are idempotent under at-least-once delivery. Duplicate page or snapshot p
 
 ### Explicit browser-capture command
 
-Platform routes an explicit X permalink through the provider-only JetStream subject
-`cmd.x.capture.requested.v1`. The X service accepts only the canonical
-`SocialCaptureRequested` command with `provider = x`, `acquisition = browser_extension`, and
-`saved_authority = explicit_user_capture`; it stores the original permalink and action timestamp
-in its durable inbox before acknowledging delivery. This is local user intent, never an X native
-bookmark or Saved claim.
+Platform routes an explicit X permalink through the provider-only JetStream subject `cmd.x.capture.requested.v1`. The X service accepts only the canonical `SocialCaptureRequested` command with `provider = x`, `acquisition = browser_extension`, and `saved_authority = explicit_user_capture`, and a command without a tenant is refused as a poison command because the lane is owner-scoped. This is local user intent, never an X native bookmark or Saved claim.
 
-Platform pre-provisions the fixed `ratatoskr_x_browser_capture` pull durable. X connects with its
-own NKey seed path (`RATATOSKR__BUS__NKEY_SEED_PATH`) and requires a credential-free
-`RATATOSKR__BUS__URL`; its identity may read consumer information, pull only that durable, and
-acknowledge only its deliveries. It has no `$JS.API.>` permission and cannot create a consumer with
-another provider's filter. A missing or mismatched durable prevents readiness rather than silently
-dropping browser captures.
+In one transaction the consumer claims the command in the inbox, stores an `explicit_captures` row that names the owner (the command tenant), the operation and the status id of the permalink, and queues a `platform.operation.reported.v1` report with status `queued` and stage `capture_queued`. Status ids are read from the six hosts Platform accepts: `x.com`, `www.x.com`, `mobile.x.com`, `twitter.com`, `www.twitter.com`, and `mobile.twitter.com`. A permalink that names no status is stored as `unavailable` with a terminal `failed` report in the same transaction, so the operation never hangs.
+
+A separate worker (`PublicCaptureWorker`) then resolves the post with the official app-only call `GET /2/tweets?ids=<status id>` and a bearer token. It never reads posts, users, accounts or bookmarks that another tenant's sync stored: the shared `x_archive.posts` row is per provider id and may hold text only a different account was allowed to read, so the explicit lane publishes exactly what the public call returned for this owner. The result is stored in `explicit_sources`, keyed by `(owner, provider_post_id)`, so two tenants capturing one public post get distinct `social_source_id`s and each receives only their own `social.source.captured.v1` and `social.source.updated.v1` events. A repeated capture of the same post by the same owner re-resolves it, emits an update only when the content digest changed, and always reports success.
+
+Every capture ends with exactly one terminal report, written in the same transaction as its outcome and guarded by `reported_at`:
+
+| Resolution | Terminal report | Retried |
+| --- | --- | --- |
+| the post | `succeeded`, stage `capture_preserved`, result `social.post` pointing at `social_source:<id>` | no |
+| deleted (`resource-not-found`) | `failed`, code `social.source.deleted`, not retryable | no |
+| protected, unavailable or forbidden (`not-authorized-for-resource`, `resource-unavailable`, `client-forbidden`) or malformed | `failed`, code `social.source.unavailable`, not retryable | no |
+| HTTP 429, 5xx, timeout or transport error | after the fifth attempt, `failed`, code `social.source.unavailable`, retryable | 30 s, 2 min, 8 min, 30 min |
+| HTTP 401 or 403 for the whole request | treated as transient and counted in `x_public_capture_credential_rejected_total` | as above |
+
+A protected post is therefore reported honestly as unavailable; it is never served from another account's data. The credential-free `publish.twitter.com` oEmbed fallback is not implemented: `PublicPostResolver` is the seam for it.
+
+The worker needs an X developer app with read access. Provision its app-only bearer token as a file and point `RATATOSKR__PUBLIC_CAPTURE__BEARER_TOKEN_PATH` at the absolute path; the token is read once at startup and never logged. The service has a broker consumer, so it refuses to start (exit code 78) without the token rather than reporting ready while it cannot complete captures. `RATATOSKR__PUBLIC_CAPTURE__API_BASE_URL` (https only, default `https://api.x.com`), `MAX_ATTEMPTS` (5), `BATCH_SIZE` (8) and `POLL_INTERVAL_SECONDS` (2) tune the lane.
+
+Every `x_archive.outbox_events` row is a complete canonical envelope whose id is the row id: an `EventEnvelope` for `platform.operation.reported.v1` and `social.source.captured|updated|removed.v1`, and a `CommandEnvelope` carrying `ContentCaptureRequested` for `content.capture.requested.v1`. One relay publishes the unpublished rows in creation order to `evt.<event_type>` (and `cmd.content.capture.requested.v1`) with `Nats-Msg-Id` set to the row id, and sets `published_at` only after the JetStream acknowledgement. A failed publish records `attempt_count`, a content-free `last_error` class and a `next_attempt_at` backoff so a failing row never starves later rows. A denied publish is only visible in the NATS server log, so an acknowledgement timeout means: check the NATS server log for a `Publish Violation`. The deployed ACL for the X identity is the single reviewed stanza in `platform/deploy/nats/ratatoskr.conf`.
+
+The service also consumes the extractor's `platform.operation.reported.v1` through the Edge-provisioned durable `ratatoskr_x_extractor_reports` and completes linked-article captures; reports from other producers or for unknown operations are acknowledged and ignored. Any of the bus tasks (the two consumers, the capture worker and the relay) returning before an orderly shutdown flips `/health/ready` to `503` and ends the process with a failure exit code.
+
+Platform pre-provisions the fixed `ratatoskr_x_browser_capture` pull durable. X connects with its own NKey seed path (`RATATOSKR__BUS__NKEY_SEED_PATH`) and requires a credential-free `RATATOSKR__BUS__URL`; its identity may read consumer information, pull only the durables named in the ACL, and acknowledge only its deliveries. It has no `$JS.API.>` permission and cannot create a consumer with another provider's filter. A missing or mismatched durable prevents readiness rather than silently dropping browser captures.
+
+The operator listener (`/health/live`, `/health/ready`, `/metrics`, `/version`) defaults to `127.0.0.1:9087`, a host-only allocation; port `8080` belongs to the Edge public API.
 
 ## Legacy migration
 

@@ -608,6 +608,18 @@ legacy import worker
 
 Each role has bounded concurrency and allowlisted NATS subjects.
 
+### X bus subjects
+
+| Direction | Subject | Contract | Durable |
+| --- | --- | --- | --- |
+| consume | `cmd.x.capture.requested.v1` | `social.capture.requested.v1` (`CommandEnvelope`) | `ratatoskr_x_browser_capture` on `ratatoskr_commands` |
+| consume | `evt.platform.operation.reported.v1` | the extractor's report for a linked-article capture | `ratatoskr_x_extractor_reports` on `ratatoskr_events` |
+| publish | `evt.platform.operation.reported.v1` | queued and terminal reports of an explicit capture | none |
+| publish | `evt.social.source.captured.v1`, `evt.social.source.updated.v1`, `evt.social.source.removed.v1` | social facts, tenant `user:<owner>` | none |
+| publish | `cmd.content.capture.requested.v1` | linked-article capture (`CommandEnvelope`, `ContentCaptureRequested`) | none |
+
+Every published subject is the closed mapping of an `x_archive.outbox_events.event_type`, whose row is the complete canonical envelope and whose id is the envelope id and the `Nats-Msg-Id`. The explicit capture lane is owner-scoped end to end: `explicit_captures` and `explicit_sources` are keyed by the command tenant and the lane never reads another tenant's stored posts. The admin listener is host-only on `127.0.0.1:9087`.
+
 Dependencies:
 
 - PostgreSQL `x_archive` role;

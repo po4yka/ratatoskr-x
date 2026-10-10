@@ -2,7 +2,7 @@
 
 > Status: Active. Last reviewed: 2026-08-25
 
-The first scaffold is implemented: a Rust workspace with typed configuration, structured telemetry, process-state endpoints, and the first-version `x_archive` schema. The official OAuth 2.0 Authorization Code connection with PKCE — encrypted credential envelopes, rotation-aware refresh with reuse detection, revocation, scope auditing — and classed durable per-account API budget gates are implemented. Official-payload post normalization, complete bookmark snapshots with durable checkpoints, atomic authority, and observed removals, safe frequent partial bookmark scans with watermarks, bounded budget use, gap escalation, and full-snapshot drift repair evidence, native folder-membership snapshots, the explicit browser-capture NATS consumer, SocialSource/linked-article outbox facts, exact Knowledge completion linkage, the bounded compliance revalidation/takedown application service, and separately consented idempotent bookmark add/remove with an official HTTP adapter are implemented. No external runtime/API/UI surface invokes write-back; the compliance HTTP adapter, periodic scheduler, Knowledge/compliance broker wiring, and legacy importer are also not wired.
+The first scaffold is implemented: a Rust workspace with typed configuration, structured telemetry, process-state endpoints, and the first-version `x_archive` schema. The official OAuth 2.0 Authorization Code connection with PKCE — encrypted credential envelopes, rotation-aware refresh with reuse detection, revocation, scope auditing — and classed durable per-account API budget gates are implemented. Official-payload post normalization, complete bookmark snapshots with durable checkpoints, atomic authority, and observed removals, safe frequent partial bookmark scans with watermarks, bounded budget use, gap escalation, and full-snapshot drift repair evidence, native folder-membership snapshots, the owner-scoped explicit browser-capture lane (NATS consumer, public app-only resolution worker, exactly-once operation reports), complete-envelope outbox facts with one JetStream relay, linked-article report consumption, exact Knowledge completion linkage, the bounded compliance revalidation/takedown application service, and separately consented idempotent bookmark add/remove with an official HTTP adapter are implemented. No external runtime/API/UI surface invokes write-back; the compliance HTTP adapter, periodic scheduler, Knowledge completion consumption, and legacy importer are also not wired.
 
 ## Toolchain
 
@@ -38,13 +38,13 @@ cargo build --workspace --locked --release
 `cargo deny --locked check` runs in its own `deny` job in the same workflow, not in the gate above,
 so a new RustSec advisory cannot hide a clippy or test failure behind it.
 
-### Browser-capture broker fixture
+### Broker fixture and public-capture credential
 
-The X service requires the Platform-preprovisioned `ratatoskr_x_browser_capture` durable on
-`ratatoskr_commands`, filtered to `cmd.x.capture.requested.v1`. In deployment configure
-`RATATOSKR__BUS__URL` and the absolute `RATATOSKR__BUS__NKEY_SEED_PATH`; do not put an NKey seed
-in an environment value or a URL. The service only opens and validates this durable, so a local
-fixture must create the command stream and durable before starting the service.
+The X service needs two Edge-preprovisioned durables: `ratatoskr_x_browser_capture` on `ratatoskr_commands`, filtered to `cmd.x.capture.requested.v1`, and `ratatoskr_x_extractor_reports` on `ratatoskr_events`, filtered to `evt.platform.operation.reported.v1` with explicit acks and a 30 second ack wait. In deployment configure `RATATOSKR__BUS__URL` and the absolute `RATATOSKR__BUS__NKEY_SEED_PATH`; do not put an NKey seed in an environment value or a URL. The service only opens and validates the durables, so a local fixture must create both streams and both durables before starting it; `services/x/tests/smoke.rs` shows the exact configuration.
+
+The service also refuses to start (exit code 78) without `RATATOSKR__PUBLIC_CAPTURE__BEARER_TOKEN_PATH`, the absolute path of a file holding an app-only X API bearer token. The token is external: an X developer app with read access must be provisioned by the owner. Tests never need it; they serve the X API from `wiremock`.
+
+The operator listener defaults to `127.0.0.1:9087` (host only). Port `8080` is the Edge public API.
 
 The command list above and the `gate` job's `run:` steps are one list by rule; a step in `.github/workflows/ci.yml` diffs them and fails on drift, treating this document as the wrong side.
 
