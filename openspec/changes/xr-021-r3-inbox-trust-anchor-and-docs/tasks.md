@@ -20,8 +20,8 @@
 
 ## 5. Documentation (R3-19)
 
-- [ ] 5.1 Rewrite the README paragraph that says no workspace pin exists from the code and the workspace as they are; documentation has no meaningful RED.
+- [x] 5.1 Rewrite the README paragraph that says no workspace pin exists from the code and the workspace as they are; documentation has no meaningful RED.
 
 ## 6. Gate
 
-- [ ] 6.1 Run the full local gate (`cargo fmt`, `cargo clippy`, the 850-line check, `cargo test --workspace --locked`, `cargo deny --locked check`, `openspec validate --all --strict`, `openspec validate --archived`).
+- [x] 6.1 Run the full local gate (`cargo fmt`, `cargo clippy`, the 850-line check, `cargo test --workspace --locked`, `cargo deny --locked check`, `openspec validate --all --strict`, `openspec validate --archived`).
