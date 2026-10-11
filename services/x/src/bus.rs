@@ -5,7 +5,7 @@ use x_core::config::BusConfig;
 use crate::bootstrap::BootstrapError;
 
 /// The inbox prefix of the X identity: the one subject tree its stanza in the deployed ACL lets it
-/// subscribe to (`subscribe.allow = ["_INBOX_x.>"]`). Every JetStream reply reaches the service on
+/// subscribe to (`subscribe.allow = ["_INBOX_x.>"]`). Every `JetStream` reply reaches the service on
 /// a subject under it, so a connection without the prefix never receives one.
 pub const INBOX_PREFIX: &str = "_INBOX_x";
 

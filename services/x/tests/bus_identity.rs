@@ -1,7 +1,7 @@
 //! The service reaches its Edge-provisioned durables through its real connection function under
 //! the X stanza of the deployed ACL (XR-021 CONTRACTS.md section R3-01). That stanza lets the
 //! identity subscribe only to `_INBOX_x.>`, so a connection without the inbox prefix never
-//! receives a JetStream reply.
+//! receives a `JetStream` reply.
 
 #![allow(
     clippy::expect_used,
