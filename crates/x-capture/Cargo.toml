@@ -15,6 +15,7 @@ path = "src/lib.rs"
 async-nats.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
+metrics.workspace = true
 ratatoskr-event-envelope.workspace = true
 ratatoskr-identifiers.workspace = true
 ratatoskr-operation-contracts.workspace = true

@@ -647,12 +647,16 @@ CREATE TABLE IF NOT EXISTS x_archive.outbox_events (
     published_at    timestamptz,
     attempt_count   integer NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     last_error      text,
-    next_attempt_at timestamptz NOT NULL DEFAULT now()
+    next_attempt_at timestamptz NOT NULL DEFAULT now(),
+    -- Set when the body can never be delivered (larger than the broker's `max_payload`): the
+    -- relay never selects the row again and the row never counts against relay health
+    -- (XR-021 CONTRACTS.md R2-04).
+    undeliverable_at timestamptz
 );
 
 CREATE INDEX IF NOT EXISTS outbox_events_unpublished_idx
     ON x_archive.outbox_events (next_attempt_at, created_at, id)
-    WHERE published_at IS NULL;
+    WHERE published_at IS NULL AND undeliverable_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS x_archive.inbox_events (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),

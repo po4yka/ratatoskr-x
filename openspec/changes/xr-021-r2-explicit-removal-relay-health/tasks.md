@@ -5,8 +5,8 @@
 
 ## 2. Relay health reaches readiness (R2-03, R2-04)
 
-- [ ] 2.1 Add `repeated_refusals_mark_the_relay_unhealthy_until_a_clean_pass` and `an_oversize_body_is_undeliverable_and_later_rows_publish` to `crates/x-capture/tests/outbox_relay.rs`, and `readiness_follows_the_relay` to `services/x/tests/smoke.rs`; run them RED, with a signature-only `RelayHealth` that always reports healthy and a relay that treats every failure as transient.
-- [ ] 2.2 Implement `RelayHealth`, the `payload_too_large` check in `JetStreamPublisher::send`, `undeliverable_at` in `schema.sql` and the readiness wiring in `services/x/src/main.rs` so the three tests pass.
+- [x] 2.1 Add `repeated_refusals_mark_the_relay_unhealthy_until_a_clean_pass` and `an_oversize_body_is_undeliverable_and_later_rows_publish` to `crates/x-capture/tests/outbox_relay.rs`, and `readiness_follows_the_relay` to `services/x/tests/smoke.rs`; run them RED, with a signature-only `RelayHealth` that always reports healthy and a relay that treats every failure as transient.
+- [x] 2.2 Implement `RelayHealth`, the `payload_too_large` check in `JetStreamPublisher::send`, `undeliverable_at` in `schema.sql` and the readiness wiring in `services/x/src/main.rs` so the three tests pass.
 
 ## 3. Documentation and operator example (R2-10)
 

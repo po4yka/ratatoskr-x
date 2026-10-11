@@ -81,6 +81,14 @@ jobs:
           docker logs nats >&2
           exit 1
 
+      # `readiness_follows_the_relay` starts its own authorization-enabled broker, so the server
+      # binary must be on PATH. It is the one the container above already runs.
+      - name: Put nats-server on PATH
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          docker cp nats:/usr/local/bin/nats-server "$RUNNER_TEMP/bin/nats-server"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
       - run: cargo fetch --locked
 
       - run: cargo fmt --all -- --check

@@ -6,7 +6,7 @@
     reason = "assertions in a test binary"
 )]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -75,7 +75,7 @@ async fn row(test: &TestDatabase, id: Uuid) -> Row {
 /// at publish time (a row is marked only after the acknowledgement).
 struct ScriptedPublisher {
     database: x_persistence::database::Database,
-    failing: Mutex<HashSet<Uuid>>,
+    failing: Mutex<HashMap<Uuid, &'static str>>,
     calls: Mutex<Vec<(String, String, bool)>>,
 }
 
@@ -100,12 +100,8 @@ impl OutboxPublisher for ScriptedPublisher {
                 message_id.to_owned(),
                 unmarked,
             ));
-            if self.failing.lock().expect("not poisoned").contains(&id) {
-                return Err(PublishFailure {
-                    class: "ack_timeout",
-                });
-            }
-            Ok(())
+            let class = self.failing.lock().expect("not poisoned").get(&id).copied();
+            class.map_or(Ok(()), |class| Err(PublishFailure { class }))
         })
     }
 }
@@ -210,7 +206,7 @@ async fn a_failed_publish_marks_nothing_stops_the_pass_and_a_later_pass_skips_th
     let third = insert_row(&test, "platform.operation.reported.v1", 2).await;
     let publisher = Arc::new(ScriptedPublisher {
         database: test.database.clone(),
-        failing: Mutex::new(HashSet::from([head])),
+        failing: Mutex::new(HashMap::from([(head, "ack_timeout")])),
         calls: Mutex::new(Vec::new()),
     });
     let relay = OutboxRelay::new(test.database.clone(), publisher.clone());
@@ -282,7 +278,7 @@ async fn an_unmappable_event_type_stops_the_relay_instead_of_being_skipped() {
     let later = insert_row(&test, "social.source.captured.v1", 1).await;
     let publisher = Arc::new(ScriptedPublisher {
         database: test.database.clone(),
-        failing: Mutex::new(HashSet::new()),
+        failing: Mutex::new(HashMap::new()),
         calls: Mutex::new(Vec::new()),
     });
     let relay = OutboxRelay::new(test.database.clone(), publisher.clone());
@@ -356,4 +352,187 @@ async fn find_by_message_id(
 )]
 fn nats_url() -> String {
     std::env::var("X_TEST_NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:14224".to_owned())
+}
+
+/// A row queued now, so its age cannot be what makes the relay unhealthy.
+async fn insert_fresh_row(test: &TestDatabase) -> Uuid {
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "insert into x_archive.outbox_events (id, aggregate, event_type, payload) \
+         values ($1, $2, 'social.source.captured.v1', '{}'::jsonb)",
+    )
+    .bind(id)
+    .bind(format!("social_source:{id}"))
+    .execute(test.database.pool())
+    .await
+    .expect("the outbox row seeds");
+    id
+}
+
+/// Makes every backed-off row due now, as if its backoff had elapsed.
+async fn backoff_elapsed(test: &TestDatabase) {
+    sqlx::query(
+        "update x_archive.outbox_events set next_attempt_at = now() where published_at is null",
+    )
+    .execute(test.database.pool())
+    .await
+    .expect("the backoff is cleared");
+}
+
+fn scripted(test: &TestDatabase, failing: &[(Uuid, &'static str)]) -> Arc<ScriptedPublisher> {
+    Arc::new(ScriptedPublisher {
+        database: test.database.clone(),
+        failing: Mutex::new(failing.iter().copied().collect()),
+        calls: Mutex::new(Vec::new()),
+    })
+}
+
+#[tokio::test]
+async fn repeated_refusals_mark_the_relay_unhealthy_until_a_clean_pass() {
+    let test = TestDatabase::create().await.expect("a disposable database");
+    let head = insert_fresh_row(&test).await;
+    let publisher = scripted(&test, &[(head, "ack_timeout")]);
+    let relay = OutboxRelay::new(test.database.clone(), publisher.clone());
+    let health = relay.health();
+    assert!(health.is_healthy(), "a new relay is healthy");
+
+    for attempt in 1..=2 {
+        relay.run_once().await.expect("the pass completes");
+        assert!(
+            health.is_healthy(),
+            "attempt {attempt} of a young row is not yet a pattern"
+        );
+        backoff_elapsed(&test).await;
+    }
+    relay.run_once().await.expect("the third pass completes");
+    assert_eq!(row(&test, head).await.attempts, 3);
+    assert!(
+        !health.is_healthy(),
+        "the head row has been refused three times"
+    );
+
+    backoff_elapsed(&test).await;
+    publisher.failing.lock().expect("not poisoned").clear();
+    let clean = relay.run_once().await.expect("the clean pass completes");
+    assert_eq!((clean.published, clean.failed), (1, 0));
+    assert!(health.is_healthy(), "a clean pass restores health");
+
+    let empty = relay.run_once().await.expect("the empty pass completes");
+    assert_eq!((empty.published, empty.failed), (0, 0));
+    assert!(health.is_healthy(), "an empty pass stays healthy");
+    test.cleanup().await.expect("cleanup drops the database");
+}
+
+#[tokio::test]
+async fn a_failing_row_stays_unhealthy_while_it_is_backed_off() {
+    let test = TestDatabase::create().await.expect("a disposable database");
+    let head = insert_fresh_row(&test).await;
+    let publisher = scripted(&test, &[(head, "ack_timeout")]);
+    let relay = OutboxRelay::new(test.database.clone(), publisher);
+    let health = relay.health();
+    for _ in 0..3 {
+        relay.run_once().await.expect("the pass completes");
+        backoff_elapsed(&test).await;
+    }
+    relay.run_once().await.expect("the third refusal completes");
+    sqlx::query(
+        "update x_archive.outbox_events set next_attempt_at = now() + interval '5 minutes'",
+    )
+    .execute(test.database.pool())
+    .await
+    .expect("the row is backed off");
+    assert!(!health.is_healthy());
+
+    let idle = relay.run_once().await.expect("a pass with nothing due");
+    assert_eq!((idle.published, idle.failed), (0, 0));
+    assert!(
+        !health.is_healthy(),
+        "a pass that finds nothing due does not forgive a row that is still failing"
+    );
+    test.cleanup().await.expect("cleanup drops the database");
+}
+
+#[tokio::test]
+async fn a_row_that_keeps_failing_for_five_minutes_marks_the_relay_unhealthy() {
+    let test = TestDatabase::create().await.expect("a disposable database");
+    let old = insert_row(&test, "social.source.captured.v1", 0).await;
+    let publisher = scripted(&test, &[(old, "ack_timeout")]);
+    let relay = OutboxRelay::new(test.database.clone(), publisher);
+    let health = relay.health();
+
+    relay.run_once().await.expect("the pass completes");
+
+    assert_eq!(row(&test, old).await.attempts, 1);
+    assert!(
+        !health.is_healthy(),
+        "one refusal of a row older than 300 seconds is enough"
+    );
+    test.cleanup().await.expect("cleanup drops the database");
+}
+
+#[tokio::test]
+async fn an_oversize_body_is_undeliverable_and_later_rows_publish() {
+    let test = TestDatabase::create().await.expect("a disposable database");
+    let oversize = insert_fresh_row(&test).await;
+    let later = insert_fresh_row(&test).await;
+    let publisher = scripted(&test, &[(oversize, "payload_too_large")]);
+    let relay = OutboxRelay::new(test.database.clone(), publisher.clone());
+
+    let report = relay.run_once().await.expect("the pass completes");
+
+    assert_eq!(
+        (report.published, report.failed, report.undeliverable),
+        (1, 0, 1)
+    );
+    assert!(row(&test, later).await.published, "the next row published");
+    let undeliverable: (bool, i32, Option<String>, bool) = sqlx::query_as(
+        "select undeliverable_at is not null, attempt_count, last_error, published_at is null \
+           from x_archive.outbox_events where id = $1",
+    )
+    .bind(oversize)
+    .fetch_one(test.database.pool())
+    .await
+    .expect("the row is readable");
+    assert_eq!(
+        undeliverable,
+        (true, 1, Some("payload_too_large".to_owned()), true)
+    );
+
+    backoff_elapsed(&test).await;
+    let again = relay.run_once().await.expect("the next pass completes");
+    assert_eq!(
+        (again.published, again.failed, again.undeliverable),
+        (0, 0, 0),
+        "an undeliverable row is never selected again"
+    );
+    assert_eq!(
+        publisher.calls.lock().expect("not poisoned").len(),
+        2,
+        "the oversize row was offered to the publisher once"
+    );
+    assert!(
+        relay.health().is_healthy(),
+        "an undeliverable row never counts against health"
+    );
+    test.cleanup().await.expect("cleanup drops the database");
+}
+
+#[tokio::test]
+async fn the_jetstream_publisher_refuses_a_body_the_server_would_reject() {
+    let client = async_nats::connect(nats_url()).await.expect("test NATS");
+    let limit = client.server_info().max_payload;
+    let publisher = JetStreamPublisher::new(jetstream::new(client));
+
+    // Below the server limit but inside the 1 KiB headroom: the broker would take it, the
+    // publisher must still refuse it so a header or framing overhead can never tip it over.
+    let failure = publisher
+        .publish(
+            "evt.social.source.captured.v1",
+            &Uuid::now_v7().to_string(),
+            vec![b'x'; limit - 512],
+        )
+        .await
+        .expect_err("a body inside the headroom is refused before it is published");
+
+    assert_eq!(failure.class, "payload_too_large");
 }

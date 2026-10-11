@@ -72,8 +72,16 @@ async fn run() -> Result<(), BootstrapError> {
     let state = Arc::new(RuntimeState::new());
     state.mark_database_ready();
     let (stop_tx, stop_rx) = watch::channel(false);
-    let tasks = spawn_bus_tasks(&config, &database, &context, &bearer_token, &stop_rx)?;
+    // Before the tasks start: the relay reports its health from its own task from then on.
     state.set_bus_ready(true);
+    let tasks = spawn_bus_tasks(
+        &config,
+        &database,
+        &context,
+        &bearer_token,
+        &stop_rx,
+        &state,
+    )?;
 
     let listener = tokio::net::TcpListener::bind(&config.admin.listen_addr)
         .await
@@ -144,6 +152,7 @@ fn spawn_bus_tasks(
     context: &jetstream::Context,
     bearer_token: &str,
     stop: &watch::Receiver<bool>,
+    state: &Arc<RuntimeState>,
 ) -> Result<JoinSet<TaskExit>, BootstrapError> {
     let resolver = AppBearerResolver::new(&config.public_capture.api_base_url, bearer_token)
         .map_err(|error| BootstrapError::PublicCapture(error.to_string()))?;
@@ -211,12 +220,14 @@ fn spawn_bus_tasks(
         ("public_capture_worker", result)
     });
 
-    let signal = stopped(stop);
+    // A relay that keeps running but cannot publish only leaves readiness; it never stops the
+    // process (CONTRACTS.md R2-03). A relay that returns is handled as any stopped bus task.
+    let (signal, state) = (stopped(stop), Arc::clone(state));
     tasks.spawn(async move {
-        (
-            "outbox_relay",
-            relay.run(signal).await.map_err(|e| e.to_string()),
-        )
+        let result = relay
+            .run(signal, |healthy| state.set_bus_ready(healthy))
+            .await;
+        ("outbox_relay", result.map_err(|e| e.to_string()))
     });
     Ok(tasks)
 }

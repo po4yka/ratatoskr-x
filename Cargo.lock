@@ -2386,6 +2386,7 @@ dependencies = [
  "async-nats",
  "chrono",
  "futures-util",
+ "metrics",
  "ratatoskr-event-envelope",
  "ratatoskr-identifiers",
  "ratatoskr-operation-contracts",
