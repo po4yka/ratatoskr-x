@@ -15,8 +15,8 @@
 
 ## 4. The example names the shared database (R3-11)
 
-- [ ] 4.1 Add `the_example_names_the_shared_database_and_the_role_file_exists` to `services/x/tests/bootstrap.rs`; run it RED, the example names `ratatoskr_x` and no role file exists.
-- [ ] 4.2 Edit the example, add `deploy/postgres/role.sql` and the README deployment paragraph.
+- [x] 4.1 Add `the_example_names_the_shared_database_and_the_role_file_exists` to `services/x/tests/bootstrap.rs`; run it RED, the example names `ratatoskr_x` and no role file exists.
+- [x] 4.2 Edit the example, add `deploy/postgres/role.sql` and the README deployment paragraph.
 
 ## 5. Documentation (R3-19)
 

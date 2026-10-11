@@ -388,6 +388,10 @@ Every sync run records mode, pages, cursors, request budget, completeness, warni
 
 Planned: `ratatoskr-workspace` will pin this service with compatible social contracts, Platform, Knowledge, Extractor, Web, Mobile, Browser Extension, and Telegram commits. No workspace pin or integration profile exists for this service today. The service will remain independently testable using recorded provider fixtures and mock OAuth/API servers.
 
+### Deployment
+
+The host runs one PostgreSQL database, `ratatoskr`, and every service connects to it as its own role. Provision this service in this order: Platform's `01-database-and-roles.sql`, the first Edge start, Platform's `02-grants.sql`, then `deploy/postgres/role.sql` of this repository as a PostgreSQL administrator (it creates `ratatoskr_x` without a password, with `connect` and `create` on `ratatoskr`; set the password with `\password ratatoskr_x`), then the NKey seed at `/etc/ratatoskr/x.nkey`, the bearer token file, `/etc/ratatoskr/x.conf` from `deploy/systemd/x.conf.example`, and the public key of the X stanza in the NATS `authorization.users` list. The service creates its `x_archive` schema from `schema.sql` at start.
+
 ## Project status
 
 Plan items 1–8 in `docs/IMPLEMENTATION_PLAN.md` now have durable application behavior and tests.

@@ -11,7 +11,10 @@
 # to the Edge public API; the allocation table is docs/DEPLOYMENT_TARGET.md in the workspace.
 RATATOSKR__ADMIN__LISTEN_ADDR=127.0.0.1:9087
 
-RATATOSKR__DATABASE__URL=postgres://ratatoskr_x:CHANGE-ME@127.0.0.1:5432/ratatoskr_x
+# Every Ratatoskr service connects to the one database `ratatoskr` as its own role. An administrator
+# creates the role with `deploy/postgres/role.sql` before the first start (after Platform's
+# `01-database-and-roles.sql`) and sets its password with `\password ratatoskr_x`.
+RATATOSKR__DATABASE__URL=postgres://ratatoskr_x:CHANGE-ME@127.0.0.1:5432/ratatoskr
 
 # The private broker. The URL carries no credential; the identity is the NKey seed, installed at
 # /etc/ratatoskr/<identity>.nkey like every other seed and readable only by `ratatoskr-x`.
@@ -23,10 +26,6 @@ RATATOSKR__BUS__NKEY_SEED_PATH=/etc/ratatoskr/x.nkey
 # 78) without it whenever the bus is configured. Put the token alone in the file.
 RATATOSKR__PUBLIC_CAPTURE__BEARER_TOKEN_PATH=/etc/ratatoskr/x-public-capture.token
 RATATOSKR__PUBLIC_CAPTURE__API_BASE_URL=https://api.x.com
-# Optional. An absolute path to a PEM file whose certificates the public-capture client trusts in
-# addition to the host trust store, for an operator behind a TLS-inspecting proxy. It applies to
-# that client only. Leave it commented out otherwise.
-# RATATOSKR__PUBLIC_CAPTURE__EXTRA_CA_FILE=/etc/ratatoskr/x-extra-ca.pem
 # Optional. An absolute path to a PEM file whose certificates the public-capture client trusts in
 # addition to the host trust store, for an operator behind a TLS-inspecting proxy. It applies to
 # that client only. Leave it commented out otherwise.

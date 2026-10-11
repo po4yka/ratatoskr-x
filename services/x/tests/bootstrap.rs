@@ -138,3 +138,58 @@ fn the_shipped_example_loads() {
     let _ = std::fs::remove_file(&seed);
     let _ = std::fs::remove_file(&token);
 }
+
+/// The shared database every Ratatoskr service connects to as its own role (XR-021 CONTRACTS.md
+/// R3-11).
+const SHARED_DATABASE_URL: &str = "postgres://ratatoskr_x:CHANGE-ME@127.0.0.1:5432/ratatoskr";
+
+#[test]
+fn the_example_names_the_shared_database_and_the_role_file_exists() {
+    let example = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/systemd/x.conf.example"
+    ))
+    .expect("deploy/systemd/x.conf.example is shipped");
+    let suffix = uuid::Uuid::now_v7().simple();
+    let seed = std::env::temp_dir().join(format!("ratatoskr-x-shared-{suffix}.nkey"));
+    let token = std::env::temp_dir().join(format!("ratatoskr-x-shared-{suffix}.token"));
+    std::fs::write(&seed, "seed").expect("the seed stand-in is written");
+    std::fs::write(&token, "token").expect("the token stand-in is written");
+    let substituted: Vec<(String, String)> = environment_pairs(&example)
+        .into_iter()
+        .map(|(key, value)| match key.as_str() {
+            "RATATOSKR__BUS__NKEY_SEED_PATH" => (key, seed.display().to_string()),
+            "RATATOSKR__PUBLIC_CAPTURE__BEARER_TOKEN_PATH" => (key, token.display().to_string()),
+            _ => (key, value),
+        })
+        .collect();
+
+    let config = XConfig::extract_from(&figment_from(&substituted))
+        .expect("the shipped example is a valid configuration");
+    let _ = std::fs::remove_file(&seed);
+    let _ = std::fs::remove_file(&token);
+
+    assert_eq!(
+        config.database.url, SHARED_DATABASE_URL,
+        "the example connects as its own role to the one shared database on 5432"
+    );
+
+    let role = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/postgres/role.sql"
+    ))
+    .expect("deploy/postgres/role.sql creates the role the example names");
+    for required in [
+        "create role ratatoskr_x login;",
+        "nosuperuser nocreatedb nocreaterole noreplication nobypassrls",
+        "grant connect, create on database ratatoskr to ratatoskr_x;",
+        "\\connect ratatoskr",
+        "revoke all on schema public from ratatoskr_x;",
+    ] {
+        assert!(role.contains(required), "role.sql lacks: {required}");
+    }
+    assert!(
+        !role.to_ascii_lowercase().contains("password '"),
+        "no credential belongs in the role file"
+    );
+}
