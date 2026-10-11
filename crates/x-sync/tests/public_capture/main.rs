@@ -8,6 +8,7 @@
 )]
 
 mod outcomes;
+mod removal;
 mod retry;
 mod support;
 

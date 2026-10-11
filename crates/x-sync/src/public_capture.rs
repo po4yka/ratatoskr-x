@@ -15,8 +15,8 @@ use chrono::{DateTime, Duration, Utc};
 use ratatoskr_identifiers::{CommandId, OperationId, SocialSourceId, UserId};
 use ratatoskr_operation_contracts::OperationReported;
 use ratatoskr_social_contracts::{
-    SocialContractError, SourceUnavailability, preserved_report, report_envelope,
-    unavailable_report,
+    SocialContractError, SocialSourceRemoved, SourceUnavailability, preserved_report,
+    report_envelope, unavailable_report,
 };
 use sqlx::types::Uuid;
 use x_budget::gate::Clock;
@@ -24,7 +24,7 @@ use x_persistence::database::Database;
 use x_persistence::outbox::{OutboxError, enqueue_event};
 
 use crate::SnapshotError;
-use crate::envelopes::{PRODUCER, QueueError, entity};
+use crate::envelopes::{EnvelopeFacts, PRODUCER, QueueError, entity, queue_event, wire_timestamp};
 use crate::public_post::{PublicPost, PublicPostFailure, PublicPostResolver};
 use crate::social_sources::{EXPLICIT_PROVENANCE, SourceFact, SourceFacts, queue_source_event};
 
@@ -265,6 +265,7 @@ impl PublicCaptureWorker {
             .begin()
             .await
             .map_err(PublicCaptureError::Query)?;
+        lock_owner_post(&mut transaction, capture).await?;
         let guarded = sqlx::query(
             "update x_archive.explicit_captures \
                 set status = 'unavailable', attempts = attempts + 1, reported_at = $2 \
@@ -283,6 +284,9 @@ impl PublicCaptureWorker {
                 PublicPostFailure::Inaccessible => SourceUnavailability::Inaccessible,
                 PublicPostFailure::Transient => SourceUnavailability::Transient,
             };
+            if failure == PublicPostFailure::Deleted {
+                remove_owner_source(&mut transaction, capture, self.clock.now()).await?;
+            }
             let report = unavailable_report(OperationId(capture.operation_id), reason)?;
             queue_report(&mut transaction, capture, &report).await?;
         }
@@ -305,14 +309,7 @@ impl PublicCaptureWorker {
             .begin()
             .await
             .map_err(PublicCaptureError::Query)?;
-        sqlx::query("select pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(format!(
-                "explicit_source:{}:{}",
-                capture.owner, capture.provider_post_id
-            ))
-            .execute(&mut *transaction)
-            .await
-            .map_err(PublicCaptureError::Query)?;
+        lock_owner_post(&mut transaction, capture).await?;
         let source_id = upsert_owner_source(&mut transaction, capture, post).await?;
         let guarded = sqlx::query(
             "update x_archive.explicit_captures \
@@ -354,6 +351,68 @@ fn retry_delay(failures: i32) -> Duration {
         .min(8);
     let seconds = FIRST_RETRY_SECONDS.saturating_mul(4_i64.pow(exponent));
     Duration::seconds(seconds.min(MAX_RETRY_SECONDS))
+}
+
+/// Serializes every change of one owner's source for one post.
+async fn lock_owner_post(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    capture: &ClaimedCapture,
+) -> Result<(), PublicCaptureError> {
+    sqlx::query("select pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!(
+            "explicit_source:{}:{}",
+            capture.owner, capture.provider_post_id
+        ))
+        .execute(&mut **transaction)
+        .await
+        .map_err(PublicCaptureError::Query)?;
+    Ok(())
+}
+
+/// Deletes the owner's source for a post the provider deleted and queues the removal fact.
+///
+/// The closed contract `RemovalReason` has no provider-deleted variant (adding one is a contract
+/// change), so the fact carries `retention_policy`. No removed marker is kept: a later capture of
+/// a restored post preserves it as a new source, which Knowledge admits because its capture time
+/// is after the removal. An owner who never preserved the post has nothing to remove.
+async fn remove_owner_source(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    capture: &ClaimedCapture,
+    removed_at: DateTime<Utc>,
+) -> Result<(), PublicCaptureError> {
+    let removed: Option<Uuid> = sqlx::query_scalar(
+        "delete from x_archive.explicit_sources where owner = $1 and provider_post_id = $2 \
+         returning social_source_id",
+    )
+    .bind(capture.owner)
+    .bind(&capture.provider_post_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(PublicCaptureError::Query)?;
+    let Some(source_id) = removed else {
+        return Ok(());
+    };
+    let payload: SocialSourceRemoved = serde_json::from_value(serde_json::json!({
+        "social_source_id": source_id,
+        "owner": format!("user:{}", capture.owner),
+        "reason": "retention_policy",
+        "removed_at": wire_timestamp(removed_at),
+    }))
+    .map_err(|error| QueueError::Payload(error.to_string()))?;
+    let aggregate = entity("social_source", source_id)?;
+    queue_event(
+        transaction,
+        EnvelopeFacts {
+            correlation: aggregate.clone(),
+            aggregate,
+            causation: Some(entity("capture", capture.capture_id)?),
+            owner: capture.owner,
+            occurred_at: removed_at,
+        },
+        &payload,
+    )
+    .await?;
+    Ok(())
 }
 
 type OwnerSourceRow = (Uuid, String);
