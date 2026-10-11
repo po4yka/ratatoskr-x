@@ -360,32 +360,49 @@ struct AuthorizedBroker {
     store: PathBuf,
     x_public: String,
     admin_public: String,
+    consumer: String,
 }
 
 impl AuthorizedBroker {
+    /// The X stanza of `platform/deploy/nats/ratatoskr.conf`, with this instance's durable name
+    /// and, when `withhold_captured` is set, without the captured-fact subject.
     fn config(&self, withhold_captured: bool) -> String {
-        let mut publish: Vec<String> = PUBLISHED_SUBJECTS
+        let consumer = &self.consumer;
+        let mut publish: Vec<String> = [
+            format!("$JS.API.CONSUMER.INFO.ratatoskr_commands.{consumer}"),
+            format!("$JS.API.CONSUMER.MSG.NEXT.ratatoskr_commands.{consumer}"),
+            format!("$JS.ACK.ratatoskr_commands.{consumer}.>"),
+            format!("$JS.API.CONSUMER.INFO.ratatoskr_events.{REPORTS_DURABLE}"),
+            format!("$JS.API.CONSUMER.MSG.NEXT.ratatoskr_events.{REPORTS_DURABLE}"),
+            format!("$JS.ACK.ratatoskr_events.{REPORTS_DURABLE}.>"),
+        ]
+        .into_iter()
+        .chain(
+            PUBLISHED_SUBJECTS
+                .iter()
+                .map(|subject| (*subject).to_owned()),
+        )
+        .collect();
+        if !withhold_captured {
+            publish.push(WITHHELD_SUBJECT.to_owned());
+        }
+        let publish = publish
             .iter()
             .map(|subject| format!("\"{subject}\""))
-            .collect();
-        if !withhold_captured {
-            publish.push(format!("\"{WITHHELD_SUBJECT}\""));
-        }
-        publish.push("\"$JS.API.>\"".to_owned());
-        publish.push("\"$JS.ACK.>\"".to_owned());
+            .collect::<Vec<_>>()
+            .join(", ");
         format!(
             "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{store}\" }}\nauthorization {{\n  \
-             users = [\n    {{ nkey: {x} , permissions: {{ publish: {{ allow: [{publish}] }}, \
+             users = [\n    {{ nkey: {x}, permissions: {{ publish: {{ allow: [{publish}] }}, \
              subscribe: {{ allow: [\"_INBOX.>\"] }} }} }}\n    {{ nkey: {admin} }}\n  ]\n}}\n",
             port = self.port,
             store = self.store.display(),
             x = self.x_public,
             admin = self.admin_public,
-            publish = publish.join(", "),
         )
     }
 
-    fn start(x_public: &str, admin_public: &str) -> Self {
+    fn start(x_public: &str, admin_public: &str, consumer: &str) -> Self {
         let suffix = uuid::Uuid::now_v7().simple();
         let port = free_port();
         let store = std::env::temp_dir().join(format!("ratatoskr-x-smoke-js-{suffix}"));
@@ -398,6 +415,7 @@ impl AuthorizedBroker {
             store,
             x_public: x_public.to_owned(),
             admin_public: admin_public.to_owned(),
+            consumer: consumer.to_owned(),
         };
         let _ = broker.child.wait();
         std::fs::write(&broker.config_path, broker.config(true))
@@ -464,7 +482,9 @@ async fn readiness_follows_the_relay() {
     let database = TestDatabase::create().await.expect("a disposable database");
     let x_seed = nkeys::KeyPair::new_user();
     let admin_seed = nkeys::KeyPair::new_user();
-    let authorized = AuthorizedBroker::start(&x_seed.public_key(), &admin_seed.public_key());
+    let consumer = format!("x_browser_capture_relay_{}", uuid::Uuid::now_v7().simple());
+    let authorized =
+        AuthorizedBroker::start(&x_seed.public_key(), &admin_seed.public_key(), &consumer);
     let admin = async_nats::ConnectOptions::with_nkey(admin_seed.seed().expect("a seed"))
         .connect(authorized.url())
         .await
@@ -475,7 +495,7 @@ async fn readiness_follows_the_relay() {
             .join(format!("ratatoskr-x-relay-{}.nkey", uuid::Uuid::now_v7())),
         token_path: std::env::temp_dir()
             .join(format!("ratatoskr-x-relay-{}.token", uuid::Uuid::now_v7())),
-        consumer: format!("x_browser_capture_relay_{}", uuid::Uuid::now_v7().simple()),
+        consumer,
     };
     provision(admin, &broker.consumer).await;
     std::fs::write(&broker.seed_path, x_seed.seed().expect("a seed")).expect("the seed is written");

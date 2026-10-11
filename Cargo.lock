@@ -2345,6 +2345,7 @@ dependencies = [
  "async-nats",
  "axum",
  "chrono",
+ "figment",
  "futures-util",
  "nkeys",
  "ratatoskr-event-envelope",

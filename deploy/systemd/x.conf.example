@@ -1,0 +1,32 @@
+# /etc/ratatoskr/x.conf — root:ratatoskr-x 0640.
+#
+# systemd reads this as root and hands the values to a process running as `ratatoskr-x`, so the
+# database password is never world-readable and never on a command line. The NKey seed and the
+# bearer token are files, never values: only their absolute paths appear here.
+#
+# `services/x/tests/bootstrap.rs::the_shipped_example_loads` loads this file through the X
+# configuration loader, so a renamed or removed key fails the build instead of being ignored.
+
+# The operator listener (/health/live, /health/ready, /metrics, /version). Host only. 8080 belongs
+# to the Edge public API; the allocation table is docs/DEPLOYMENT_TARGET.md in the workspace.
+RATATOSKR__ADMIN__LISTEN_ADDR=127.0.0.1:9087
+
+RATATOSKR__DATABASE__URL=postgres://ratatoskr_x:CHANGE-ME@127.0.0.1:5432/ratatoskr_x
+
+# The private broker. The URL carries no credential; the identity is the NKey seed, installed at
+# /etc/ratatoskr/<identity>.nkey like every other seed and readable only by `ratatoskr-x`.
+RATATOSKR__BUS__URL=nats://127.0.0.1:4222
+RATATOSKR__BUS__NKEY_SEED_PATH=/etc/ratatoskr/x.nkey
+
+# The explicit browser-capture lane resolves a post with an app-only bearer token from an X
+# developer app with read access, which the owner provisions. The service refuses to start (exit
+# 78) without it whenever the bus is configured. Put the token alone in the file.
+RATATOSKR__PUBLIC_CAPTURE__BEARER_TOKEN_PATH=/etc/ratatoskr/x-public-capture.token
+RATATOSKR__PUBLIC_CAPTURE__API_BASE_URL=https://api.x.com
+# Resolution attempts before a transient failure becomes a terminal report, captures claimed per
+# pass, and the pause between passes.
+RATATOSKR__PUBLIC_CAPTURE__MAX_ATTEMPTS=5
+RATATOSKR__PUBLIC_CAPTURE__BATCH_SIZE=8
+RATATOSKR__PUBLIC_CAPTURE__POLL_INTERVAL_SECONDS=2
+
+RATATOSKR__TELEMETRY__LOG_FORMAT=json

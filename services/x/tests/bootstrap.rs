@@ -6,7 +6,11 @@
     reason = "assertions in a test binary"
 )]
 
+use figment::Figment;
+use figment::providers::Serialized;
+use figment::value::Value;
 use ratatoskr_x::bootstrap::BootstrapError;
+use x_core::config::{ENV_PREFIX, XConfig};
 use x_core::error::{ConfigError, Violations};
 
 #[test]
@@ -40,4 +44,97 @@ fn subsystem_errors_map_to_distinct_exit_codes() {
     ] {
         assert!(error.report().contains(word), "{word} names its subsystem");
     }
+}
+
+/// The `KEY=value` lines of a systemd `EnvironmentFile`, comments and blanks dropped.
+fn environment_pairs(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let (key, value) = line.split_once('=').expect("every line is KEY=value");
+            (key.trim().to_owned(), value.trim().to_owned())
+        })
+        .collect()
+}
+
+/// Builds the provider stack the process environment would build, from explicit pairs: the same
+/// prefix strip, the same `__` nesting, the same typed scalars.
+fn figment_from(pairs: &[(String, String)]) -> Figment {
+    let mut figment = Figment::from(Serialized::defaults(XConfig::default()));
+    for (key, value) in pairs {
+        let path = key
+            .strip_prefix(ENV_PREFIX)
+            .expect("every key carries the prefix")
+            .to_ascii_lowercase()
+            .replace("__", ".");
+        let typed = value
+            .parse::<u64>()
+            .map_or_else(|_| Value::from(value.clone()), Value::from);
+        figment = figment.merge(Serialized::default(&path, typed));
+    }
+    figment
+}
+
+#[test]
+fn the_shipped_example_loads() {
+    let example = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/systemd/x.conf.example"
+    ))
+    .expect("deploy/systemd/x.conf.example is shipped");
+    let suffix = uuid::Uuid::now_v7().simple();
+    let seed = std::env::temp_dir().join(format!("ratatoskr-x-example-{suffix}.nkey"));
+    let token = std::env::temp_dir().join(format!("ratatoskr-x-example-{suffix}.token"));
+    std::fs::write(&seed, "seed").expect("the seed stand-in is written");
+    std::fs::write(&token, "token").expect("the token stand-in is written");
+
+    let shipped = environment_pairs(&example);
+    let value_of = |key: &str| {
+        shipped.iter().find(|(name, _)| name == key).map_or_else(
+            || panic!("the example sets {key}"),
+            |(_, value)| value.clone(),
+        )
+    };
+    assert_eq!(
+        value_of("RATATOSKR__BUS__NKEY_SEED_PATH"),
+        "/etc/ratatoskr/x.nkey",
+        "the seed lives where CONTRACTS.md R2-10 puts every seed"
+    );
+    // The loader only checks that the paths are absolute; the stand-ins prove the example still
+    // names keys the loader accepts when its secrets are real files.
+    let substituted: Vec<(String, String)> = shipped
+        .iter()
+        .map(|(key, value)| match key.as_str() {
+            "RATATOSKR__BUS__NKEY_SEED_PATH" => (key.clone(), seed.display().to_string()),
+            "RATATOSKR__PUBLIC_CAPTURE__BEARER_TOKEN_PATH" => {
+                (key.clone(), token.display().to_string())
+            }
+            _ => (key.clone(), value.clone()),
+        })
+        .collect();
+
+    let config = XConfig::extract_from(&figment_from(&substituted))
+        .expect("the shipped example is a valid configuration");
+
+    assert_eq!(config.admin.listen_addr, "127.0.0.1:9087");
+    assert_eq!(config.bus.url, "nats://127.0.0.1:4222");
+    assert_eq!(config.bus.nkey_seed_path, seed.display().to_string());
+    assert_eq!(
+        config
+            .require_public_capture_token_path()
+            .expect("the bus is configured, so the token path is required"),
+        token.display().to_string()
+    );
+    assert_eq!(config.public_capture.api_base_url, "https://api.x.com");
+    assert_eq!(
+        (
+            config.public_capture.max_attempts,
+            config.public_capture.batch_size,
+            config.public_capture.poll_interval_seconds
+        ),
+        (5, 8, 2)
+    );
+    let _ = std::fs::remove_file(&seed);
+    let _ = std::fs::remove_file(&token);
 }

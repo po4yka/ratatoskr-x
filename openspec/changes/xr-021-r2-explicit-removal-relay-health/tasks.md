@@ -10,8 +10,8 @@
 
 ## 3. Documentation and operator example (R2-10)
 
-- [ ] 3.1 Add `the_shipped_example_loads` to `services/x/tests/bootstrap.rs`; run it RED, `deploy/systemd/x.conf.example` does not exist.
-- [ ] 3.2 Add the example, rewrite the README section on the transport and the dormant bookmark and compliance lane, and point DEVELOPMENT.md at the example; the documentation has no meaningful RED.
+- [x] 3.1 Add `the_shipped_example_loads` to `services/x/tests/bootstrap.rs`; run it RED, `deploy/systemd/x.conf.example` does not exist.
+- [x] 3.2 Add the example, rewrite the README section on the transport and the dormant bookmark and compliance lane, and point DEVELOPMENT.md at the example; the documentation has no meaningful RED.
 
 ## 4. Gate
 

@@ -44,7 +44,9 @@ The X service needs two Edge-preprovisioned durables: `ratatoskr_x_browser_captu
 
 The service also refuses to start (exit code 78) without `RATATOSKR__PUBLIC_CAPTURE__BEARER_TOKEN_PATH`, the absolute path of a file holding an app-only X API bearer token. The token is external: an X developer app with read access must be provisioned by the owner. Tests never need it; they serve the X API from `wiremock`.
 
-The operator listener defaults to `127.0.0.1:9087` (host only). Port `8080` is the Edge public API.
+The operator listener defaults to `127.0.0.1:9087` (host only). Port `8080` is the Edge public API. `deploy/systemd/x.conf.example` is the operator example for all of the above; `services/x/tests/bootstrap.rs` loads it, so keep it in step with `x_core::config`.
+
+`services/x/tests/smoke.rs::readiness_follows_the_relay` starts its own authorization-enabled broker, so `nats-server` must be on `PATH` (CI copies it out of the NATS container it starts; locally, install it or put the binary from `nats:2-alpine` on `PATH`). A missing binary fails the test.
 
 The command list above and the `gate` job's `run:` steps are one list by rule; a step in `.github/workflows/ci.yml` diffs them and fails on drift, treating this document as the wrong side.
 

@@ -196,10 +196,15 @@ the shared `social.source.removed.v1` fact with `reason = retention_policy`. Kno
 fact to delete or tombstone its analysis, embedding, and search projection. Normal source
 observations and delayed Knowledge completions cannot reactivate a removed source.
 
-The future runtime scheduler must call this service periodically, and the outbox/inbox transport
-must deliver the facts. Neither runtime facility exists in this bootstrap repository yet. Retention
-of normalized or raw provider bytes remains governed by separate provider/legal policy; a tombstone
-does not assert an unconditional right to retain those bytes.
+What runs today is the outbox relay (it delivers the stored facts to JetStream), the explicit
+capture lane and the extractor-report consumer. This compliance and bookmark lane is dormant: no
+service path syncs bookmarks, so there are no account sources to revalidate, and nothing calls
+`ComplianceRevalidationService`. The service therefore never produces a removal from this lane; a
+future runtime scheduler must call it periodically. The explicit lane has its own, narrower removal
+rule: a re-capture that finds the post deleted removes the owner's explicit source (see
+"Explicit browser capture"). Retention of normalized or raw provider bytes remains governed by
+separate provider/legal policy; a tombstone does not assert an unconditional right to retain those
+bytes.
 
 ## Write-back
 
@@ -286,16 +291,16 @@ Every capture ends with exactly one terminal report, written in the same transac
 | Resolution | Terminal report | Retried |
 | --- | --- | --- |
 | the post | `succeeded`, stage `capture_preserved`, result `social.post` pointing at `social_source:<id>` | no |
-| deleted (`resource-not-found`) | `failed`, code `social.source.deleted`, not retryable | no |
+| deleted (`resource-not-found`) | `failed`, code `social.source.deleted`, not retryable; when the owner already preserved the post, the same transaction deletes the owner's `explicit_sources` row and queues one `social.source.removed.v1` (reason `retention_policy`, because the closed contract reasons have no provider-deleted value) | no |
 | protected, unavailable or forbidden (`not-authorized-for-resource`, `resource-unavailable`, `client-forbidden`), malformed, or a post the shared social contract cannot represent (empty text, a control character, a handle or display name outside the grammar) | `failed`, code `social.source.unavailable`, not retryable | no |
 | HTTP 402, 408, 429, 5xx, timeout or transport error | after the fifth attempt, `failed`, code `social.source.unavailable`, retryable | 30 s, 2 min, 8 min, 30 min |
 | HTTP 401 or 403 for the whole request | treated as transient and counted in `x_public_capture_credential_rejected_total` | as above |
 
-A protected post is therefore reported honestly as unavailable; it is never served from another account's data. The credential-free `publish.twitter.com` oEmbed fallback is not implemented: `PublicPostResolver` is the seam for it.
+A protected or restricted post is therefore reported honestly as unavailable and removes nothing: the app-only token cannot tell the two apart, so only an authoritative deletion removes a source. No removed marker is kept, so a later capture of a restored post preserves it as a new source. A first capture of a deleted post has nothing to remove. A protected post is never served from another account's data. The credential-free `publish.twitter.com` oEmbed fallback is not implemented: `PublicPostResolver` is the seam for it.
 
-The worker needs an X developer app with read access. Provision its app-only bearer token as a file and point `RATATOSKR__PUBLIC_CAPTURE__BEARER_TOKEN_PATH` at the absolute path; the token is read once at startup and never logged. The service has a broker consumer, so it refuses to start (exit code 78) without the token rather than reporting ready while it cannot complete captures. `RATATOSKR__PUBLIC_CAPTURE__API_BASE_URL` (https only, default `https://api.x.com`), `MAX_ATTEMPTS` (5), `BATCH_SIZE` (8) and `POLL_INTERVAL_SECONDS` (2) tune the lane.
+`deploy/systemd/x.conf.example` ships the operator example for this lane and the bus (listener, bus URL, NKey seed path, bearer token path and the tuning values above); a test loads it through the configuration loader so it cannot rot. The worker needs an X developer app with read access. Provision its app-only bearer token as a file and point `RATATOSKR__PUBLIC_CAPTURE__BEARER_TOKEN_PATH` at the absolute path; the token is read once at startup and never logged. The service has a broker consumer, so it refuses to start (exit code 78) without the token rather than reporting ready while it cannot complete captures. `RATATOSKR__PUBLIC_CAPTURE__API_BASE_URL` (https only, default `https://api.x.com`), `MAX_ATTEMPTS` (5), `BATCH_SIZE` (8) and `POLL_INTERVAL_SECONDS` (2) tune the lane.
 
-Every `x_archive.outbox_events` row is a complete canonical envelope whose id is the row id: an `EventEnvelope` for `platform.operation.reported.v1` and `social.source.captured|updated|removed.v1`, and a `CommandEnvelope` carrying `ContentCaptureRequested` for `content.capture.requested.v1`. One relay publishes the unpublished rows in creation order to `evt.<event_type>` (and `cmd.content.capture.requested.v1`) with `Nats-Msg-Id` set to the row id, and sets `published_at` only after the JetStream acknowledgement. A failed publish records `attempt_count`, a content-free `last_error` class and a `next_attempt_at` backoff so a failing row never starves later rows (a pass stops at the first failed publish and logs its class; the later rows go out on the next pass). Because a failing head row is backed off while later rows still publish, a `queued` report can arrive after the same operation's terminal report, and a consumer must ignore a stale `queued` once a terminal one exists. A denied publish is only visible in the NATS server log, so an acknowledgement timeout means: check the NATS server log for a `Publish Violation`. The deployed ACL for the X identity is the single reviewed stanza in `platform/deploy/nats/ratatoskr.conf`.
+Every `x_archive.outbox_events` row is a complete canonical envelope whose id is the row id: an `EventEnvelope` for `platform.operation.reported.v1` and `social.source.captured|updated|removed.v1`, and a `CommandEnvelope` carrying `ContentCaptureRequested` for `content.capture.requested.v1`. One relay publishes the unpublished rows in creation order to `evt.<event_type>` (and `cmd.content.capture.requested.v1`) with `Nats-Msg-Id` set to the row id, and sets `published_at` only after the JetStream acknowledgement. A failed publish records `attempt_count`, a content-free `last_error` class and a `next_attempt_at` backoff so a failing row never starves later rows (a pass stops at the first failed publish and logs its class; the later rows go out on the next pass). Because a failing head row is backed off while later rows still publish, a `queued` report can arrive after the same operation's terminal report, and a consumer must ignore a stale `queued` once a terminal one exists. A denied publish is only visible in the NATS server log, so an acknowledgement timeout means: check the NATS server log for a `Publish Violation`. A relay that keeps running but cannot publish leaves readiness: `/health/ready` answers `503` while a publishable row has been refused three times (or refused once and is older than 300 seconds) and recovers when no such row is left, and `x_outbox_relay_unhealthy_total{class}` counts the transition. The relay never stops or exits the process for it. A body larger than the connected server's `max_payload` (less 1 KiB) can never be delivered, so the relay sets `undeliverable_at` on the row, counts it in `x_outbox_undeliverable_total{class}`, never selects it again, and publishes the next row in the same pass; an undeliverable row never counts against readiness. The deployed ACL for the X identity is the single reviewed stanza in `platform/deploy/nats/ratatoskr.conf`.
 
 The service also consumes the extractor's `platform.operation.reported.v1` through the Edge-provisioned durable `ratatoskr_x_extractor_reports` and completes linked-article captures; reports from other producers or for unknown operations are acknowledged and ignored. Any of the bus tasks (the two consumers, the capture worker and the relay) returning before an orderly shutdown flips `/health/ready` to `503` and ends the process with a failure exit code.
 
@@ -388,6 +393,7 @@ Planned: `ratatoskr-workspace` will pin this service with compatible social cont
 Plan items 1–8 in `docs/IMPLEMENTATION_PLAN.md` now have durable application behavior and tests.
 For item 8, this means revision-deduplicated SocialSource requests, exact Knowledge completion
 linkage, the revalidation ledger, and replay-safe takedown outbox state. It does not mean live
-periodic execution or Knowledge/compliance broker delivery: those require the future runtime
-scheduler, transport, and official-provider compliance adapter. Write-back and legacy migration
+periodic execution of the compliance service: that requires a runtime scheduler and an
+official-provider compliance adapter, and no service path syncs bookmarks yet. The outbox relay and
+the explicit capture lane do run. Write-back and legacy migration
 remain planned.
