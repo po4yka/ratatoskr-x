@@ -14,11 +14,11 @@ The authoritative cross-repository text is XR-021 CONTRACTS.md R3-01, R3-15, R3-
 
 ### The extra CA merges, it never replaces
 
-`AppBearerResolver` gains an options struct `ResolverOptions { connect_timeout, request_timeout, extra_ca_pem }`. The extra certificates are added with `reqwest::ClientBuilder::add_root_certificate`, which with the `rustls` feature extends the platform verifier instead of replacing it. The configuration validates the file at load (absolute, readable, at least one PEM certificate); `main` reads it once and hands the bytes to the resolver.
+`AppBearerResolver::new` and `with_timeouts` gain a final `extra_ca_pem: Option<&[u8]>` argument (there is no options struct; both call sites pass it). The certificates are parsed with `reqwest::Certificate::from_pem_bundle` and added with `reqwest::ClientBuilder::tls_certs_merge`, which keeps the platform verifier and extends its root store; `tls_certs_only` would replace the platform roots and is not used, and `add_root_certificate` is deprecated in reqwest 0.13. A bundle that holds no certificate is a `PublicPostConfigError::CaBundle`. The configuration validates the file at load (absolute, readable, at least one PEM certificate); `main` reads it once and hands the bytes to the resolver.
 
-### A terminal capture clears its retry time
+### A finished capture clears its retry time
 
-`terminate` already stamps `reported_at`. It now also sets `next_attempt_at = reported_at` in the same update, so `next_attempt_at <= reported_at` for every terminal capture.
+`claim_due` leases a row by moving `next_attempt_at` about two minutes ahead. Two outcomes finish a row and stamp `reported_at` in the same transaction as the report insert: `terminate` (deleted, inaccessible, transient-exhausted: status `unavailable`) and the preserve path (the post resolved: status `resolved`). Both now also set `next_attempt_at = reported_at`, so `next_attempt_at <= reported_at` for every finished capture. The claim query requires `status = 'accepted'`, so neither outcome could be re-claimed before; the change removes only the misleading value.
 
 ## Risks
 

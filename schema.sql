@@ -673,7 +673,8 @@ CREATE TABLE IF NOT EXISTS x_archive.inbox_events (
 -- authority. `owner` comes from the command's tenant (a command without one is a poison command),
 -- and the row is also the retry ledger of the public resolution worker: `attempts` counts the
 -- transient failures so far, `next_attempt_at` is when the next try is due (and, while a worker
--- holds the row, the end of its lease), and `reported_at` is set in the same statement that inserts
+-- holds the row, the end of its lease; a finished row, resolved or unavailable, has it equal to
+-- `reported_at`, so it never reads as a pending retry), and `reported_at` is set in the same statement that inserts
 -- the one terminal operation report, so a redelivery or a crash can only ever report once.
 -- `provider_post_id` is NULL only for a permalink that names no status; that row is terminal
 -- `unavailable` from the moment it is stored.

@@ -14,11 +14,16 @@ The service SHALL accept an optional `public_capture.extra_ca_file`, an absolute
 - **WHEN** the path is relative, missing, or the file holds no PEM certificate
 - **THEN** configuration loading fails naming `public_capture.extra_ca_file`
 
-### Requirement: A terminal capture leaves no future retry time
+### Requirement: A finished capture leaves no future retry time
 
-When a capture ends terminally, the service SHALL set its `next_attempt_at` to its `reported_at` in the same update that records the outcome.
+When a capture finishes, whether it ends unavailable (deleted, inaccessible or transient-exhausted) or resolved, the service SHALL set its `next_attempt_at` to its `reported_at` in the same transaction that records the outcome.
 
 #### Scenario: terminal outcomes clear the retry time
 
 - **WHEN** a capture ends deleted, inaccessible or transient-exhausted
 - **THEN** its `next_attempt_at` is not after its `reported_at`
+
+#### Scenario: a resolved capture clears the retry time
+
+- **WHEN** a capture resolves and its source is preserved
+- **THEN** its status is `resolved` and its `next_attempt_at` is not after its `reported_at`

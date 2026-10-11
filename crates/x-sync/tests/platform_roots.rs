@@ -21,7 +21,8 @@ use x_sync::test_support::TlsFake;
 use x_sync::{AppBearerResolver, PublicPostFailure, PublicPostResolver};
 
 const POST_ID: &str = "1900000000000000001";
-const BODY: &str = r#"{"data":[{"id":"1900000000000000001","text":"A public post","author_id":"42"}],
+const BODY: &str = r#"{"data":[{"id":"1900000000000000001","text":"A public post","author_id":"42",
+"created_at":"2026-08-16T09:30:00.120Z"}],
 "includes":{"users":[{"id":"42","name":"Ada Example","username":"ada"}]}}"#;
 const PLATFORM_URL: &str = "X_PROBE_PLATFORM_URL";
 const EXTRA_URL: &str = "X_PROBE_EXTRA_URL";

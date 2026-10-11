@@ -5,8 +5,9 @@
 
 ## 2. A configured CA is trusted (R3-15 rule 1)
 
-- [x] 2.1 Add `the_extra_ca_file_must_be_absolute_readable_and_hold_a_certificate`, `a_private_ca_is_trusted_only_when_configured`, `the_extra_ca_does_not_replace_the_platform_roots` and `the_success_leg_runs_over_https_with_a_private_ca`; run them RED, the key does not exist.
-- [x] 2.2 Add `public_capture.extra_ca_file`, the resolver options and the wiring in `main` so they pass.
+- [x] 2.1 Add `the_extra_ca_file_must_be_absolute_readable_and_hold_a_certificate`, `a_private_ca_is_trusted_only_when_configured` and `the_success_leg_runs_over_https_with_a_private_ca`; run them RED, the key does not exist.
+- [x] 2.2 Add `public_capture.extra_ca_file`, the `extra_ca_pem` argument of `AppBearerResolver` and the wiring in `main` so they pass.
+- [x] 2.3 Add `crates/x-sync/tests/platform_roots.rs::the_extra_ca_does_not_replace_the_platform_roots`. The file is `#![cfg(not(target_vendor = "apple"))]` because the platform verifier on macOS reads the Security framework and cannot be redirected, so it compiles and runs only on Linux. Run on Linux (`rust:1.97-bookworm` in a container, `cargo test --locked -p ratatoskr-x-sync --test platform_roots`): the first run failed on a malformed fixture (the canned post had no `created_at`, so the lookup returned `Inaccessible` after a successful handshake), the fixture was fixed, and the second run passed. As a mutation check the same run with `tls_certs_merge` swapped for `tls_certs_only` (which replaces the platform roots) fails with `Transient` on the platform-trusted server, so the test does detect a replaced trust store. CI runs it on every push on Linux.
 
 ## 3. A terminal capture is terminal (R3-15 rule 2)
 
