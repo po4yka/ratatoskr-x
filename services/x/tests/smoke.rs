@@ -343,14 +343,18 @@ async fn readiness_goes_false_when_a_bus_task_stops() {
     broker.cleanup();
 }
 
-/// Subjects the X identity may publish in the deployed ACL, and the one the scenario withholds.
+/// The subject the scenario withholds and later restores.
 const WITHHELD_SUBJECT: &str = "evt.social.source.captured.v1";
-const PUBLISHED_SUBJECTS: [&str; 4] = [
-    "evt.platform.operation.reported.v1",
-    "evt.social.source.updated.v1",
-    "evt.social.source.removed.v1",
-    "cmd.content.capture.requested.v1",
-];
+
+/// The shipped X stanza (`deploy/nats/identity.conf`, byte-equal to Platform's), which the
+/// authorized-broker scenario enforces as it is.
+fn shipped_stanza() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/nats/identity.conf"
+    ))
+    .expect("deploy/nats/identity.conf is shipped")
+}
 
 /// A private `nats-server` with `JetStream` and nkey authorization, as the deployed broker has.
 struct AuthorizedBroker {
@@ -364,40 +368,27 @@ struct AuthorizedBroker {
 }
 
 impl AuthorizedBroker {
-    /// The X stanza of `platform/deploy/nats/ratatoskr.conf`, with this instance's durable name
-    /// and, when `withhold_captured` is set, without the captured-fact subject.
+    /// The shipped X stanza with this instance's public key and durable name and, when
+    /// `withhold_captured` is set, without the captured-fact subject.
     fn config(&self, withhold_captured: bool) -> String {
-        let consumer = &self.consumer;
-        let mut publish: Vec<String> = [
-            format!("$JS.API.CONSUMER.INFO.ratatoskr_commands.{consumer}"),
-            format!("$JS.API.CONSUMER.MSG.NEXT.ratatoskr_commands.{consumer}"),
-            format!("$JS.ACK.ratatoskr_commands.{consumer}.>"),
-            format!("$JS.API.CONSUMER.INFO.ratatoskr_events.{REPORTS_DURABLE}"),
-            format!("$JS.API.CONSUMER.MSG.NEXT.ratatoskr_events.{REPORTS_DURABLE}"),
-            format!("$JS.ACK.ratatoskr_events.{REPORTS_DURABLE}.>"),
-        ]
-        .into_iter()
-        .chain(
-            PUBLISHED_SUBJECTS
-                .iter()
-                .map(|subject| (*subject).to_owned()),
-        )
-        .collect();
-        if !withhold_captured {
-            publish.push(WITHHELD_SUBJECT.to_owned());
-        }
-        let publish = publish
-            .iter()
-            .map(|subject| format!("\"{subject}\""))
+        let stanza = shipped_stanza()
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#'))
+            .filter(|line| !(withhold_captured && line.contains(WITHHELD_SUBJECT)))
+            .map(|line| {
+                if line.trim_start().starts_with("nkey:") {
+                    format!("    nkey: {}", self.x_public)
+                } else {
+                    line.replace("ratatoskr_x_browser_capture", &self.consumer)
+                }
+            })
             .collect::<Vec<_>>()
-            .join(", ");
+            .join("\n");
         format!(
             "listen: 127.0.0.1:{port}\njetstream {{ store_dir: \"{store}\" }}\nauthorization {{\n  \
-             users = [\n    {{ nkey: {x}, permissions: {{ publish: {{ allow: [{publish}] }}, \
-             subscribe: {{ allow: [\"_INBOX.>\"] }} }} }}\n    {{ nkey: {admin} }}\n  ]\n}}\n",
+             users = [\n{stanza}\n    {{ nkey: {admin} }}\n  ]\n}}\n",
             port = self.port,
             store = self.store.display(),
-            x = self.x_public,
             admin = self.admin_public,
         )
     }

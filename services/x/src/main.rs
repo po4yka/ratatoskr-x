@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use async_nats::jetstream;
 use ratatoskr_x::bootstrap::BootstrapError;
+use ratatoskr_x::bus::connect_bus;
 use ratatoskr_x::extractor_reports;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -60,12 +61,7 @@ async fn run() -> Result<(), BootstrapError> {
     let database = Database::connect(&config.database.url, config.database.max_connections).await?;
     database.apply_schema().await?;
 
-    let nkey_seed =
-        std::fs::read_to_string(&config.bus.nkey_seed_path).map_err(BootstrapError::NatsSeed)?;
-    let nats_client = async_nats::ConnectOptions::with_nkey(nkey_seed.trim().to_owned())
-        .connect(&config.bus.url)
-        .await
-        .map_err(|error| BootstrapError::Nats(error.to_string()))?;
+    let nats_client = connect_bus(&config.bus).await?;
     let context = jetstream::new(nats_client.clone());
     verify_durables(&config, &context).await?;
 
