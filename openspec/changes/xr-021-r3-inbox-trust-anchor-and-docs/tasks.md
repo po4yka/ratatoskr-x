@@ -10,8 +10,8 @@
 
 ## 3. A terminal capture is terminal (R3-15 rule 2)
 
-- [ ] 3.1 Add `a_terminal_capture_leaves_no_future_next_attempt_at` to `crates/x-sync/tests/public_capture/outcomes.rs`; run it RED, the claim lease remains.
-- [ ] 3.2 Set `next_attempt_at = reported_at` in `terminate` so it passes.
+- [x] 3.1 Add `a_terminal_capture_leaves_no_future_next_attempt_at` to `crates/x-sync/tests/public_capture/outcomes.rs`; run it RED, the claim lease remains.
+- [x] 3.2 Set `next_attempt_at = reported_at` in `terminate` so it passes.
 
 ## 4. The example names the shared database (R3-11)
 

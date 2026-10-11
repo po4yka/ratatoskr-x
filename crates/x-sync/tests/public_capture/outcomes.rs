@@ -490,3 +490,62 @@ async fn a_protected_post_another_tenant_synced_is_never_published_to_the_captur
     );
     test.cleanup().await.expect("cleanup drops the database");
 }
+
+/// What `select ... from x_archive.explicit_captures` reads for a finished capture: the status,
+/// whether the retry time is still ahead of the report, and the report time.
+async fn finished_capture_clock(test: &TestDatabase, capture: Uuid) -> (String, bool) {
+    sqlx::query_as(
+        "select status, next_attempt_at <= reported_at \
+           from x_archive.explicit_captures where capture_id = $1 and reported_at is not null",
+    )
+    .bind(capture)
+    .fetch_one(test.database.pool())
+    .await
+    .expect("the finished capture is readable")
+}
+
+#[tokio::test]
+async fn a_terminal_capture_leaves_no_future_next_attempt_at() {
+    for (label, script, passes) in [
+        ("deleted", vec![Err(PublicPostFailure::Deleted)], 1),
+        (
+            "inaccessible",
+            vec![Err(PublicPostFailure::Inaccessible)],
+            1,
+        ),
+        (
+            "transient-exhausted",
+            vec![
+                Err(PublicPostFailure::Transient),
+                Err(PublicPostFailure::Transient),
+                Err(PublicPostFailure::Transient),
+                Err(PublicPostFailure::Transient),
+                Err(PublicPostFailure::Transient),
+            ],
+            5,
+        ),
+        ("preserved", vec![Ok(post("Preserved."))], 1),
+    ] {
+        let test = TestDatabase::create().await.expect("a disposable database");
+        let capture = seed_capture(&test, 1, uuid(9, 1)).await;
+        let resolver = ScriptedResolver::new(script);
+        let clock = TestClock::at(START);
+        let worker = worker(&test, &resolver, &clock);
+
+        for _ in 0..passes {
+            let summary = worker.run_due_once().await.expect("the pass completes");
+            assert_eq!(summary.claimed, 1, "{label}: the capture is due");
+            let state = capture_state(&test, capture.capture_id).await;
+            clock.set(state.2);
+        }
+
+        let (status, retry_not_after_report) =
+            finished_capture_clock(&test, capture.capture_id).await;
+        assert_ne!(status, "accepted", "{label}: the capture is finished");
+        assert!(
+            retry_not_after_report,
+            "{label}: a finished capture must not look like a pending retry"
+        );
+        test.cleanup().await.expect("cleanup drops the database");
+    }
+}

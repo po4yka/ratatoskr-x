@@ -268,7 +268,8 @@ impl PublicCaptureWorker {
         lock_owner_post(&mut transaction, capture).await?;
         let guarded = sqlx::query(
             "update x_archive.explicit_captures \
-                set status = 'unavailable', attempts = attempts + 1, reported_at = $2 \
+                set status = 'unavailable', attempts = attempts + 1, reported_at = $2, \
+                    next_attempt_at = $2 \
               where capture_id = $1 and status = 'accepted' and reported_at is null",
         )
         .bind(capture.capture_id)
@@ -314,7 +315,7 @@ impl PublicCaptureWorker {
         let guarded = sqlx::query(
             "update x_archive.explicit_captures \
                 set status = 'resolved', attempts = attempts + 1, social_source_id = $2, \
-                    reported_at = $3 \
+                    reported_at = $3, next_attempt_at = $3 \
               where capture_id = $1 and status = 'accepted' and reported_at is null",
         )
         .bind(capture.capture_id)

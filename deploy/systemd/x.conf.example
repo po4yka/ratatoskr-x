@@ -27,6 +27,10 @@ RATATOSKR__PUBLIC_CAPTURE__API_BASE_URL=https://api.x.com
 # addition to the host trust store, for an operator behind a TLS-inspecting proxy. It applies to
 # that client only. Leave it commented out otherwise.
 # RATATOSKR__PUBLIC_CAPTURE__EXTRA_CA_FILE=/etc/ratatoskr/x-extra-ca.pem
+# Optional. An absolute path to a PEM file whose certificates the public-capture client trusts in
+# addition to the host trust store, for an operator behind a TLS-inspecting proxy. It applies to
+# that client only. Leave it commented out otherwise.
+# RATATOSKR__PUBLIC_CAPTURE__EXTRA_CA_FILE=/etc/ratatoskr/x-extra-ca.pem
 # Resolution attempts before a transient failure becomes a terminal report, captures claimed per
 # pass, and the pause between passes.
 RATATOSKR__PUBLIC_CAPTURE__MAX_ATTEMPTS=5
