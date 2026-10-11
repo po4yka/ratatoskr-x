@@ -12,6 +12,9 @@ mod public_post;
 mod social_sources;
 mod writeback;
 
+#[cfg(feature = "test-support")]
+pub mod test_support;
+
 pub use articles::{
     ArticleCaptureError, ArticleCaptureService, SelectedArticleUrl, select_external_expanded_urls,
 };

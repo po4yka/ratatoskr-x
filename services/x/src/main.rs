@@ -150,8 +150,20 @@ fn spawn_bus_tasks(
     stop: &watch::Receiver<bool>,
     state: &Arc<RuntimeState>,
 ) -> Result<JoinSet<TaskExit>, BootstrapError> {
-    let resolver = AppBearerResolver::new(&config.public_capture.api_base_url, bearer_token)
-        .map_err(|error| BootstrapError::PublicCapture(error.to_string()))?;
+    // Read once; `x_core::config` already checked that the file exists and holds a certificate.
+    let extra_ca = config
+        .public_capture
+        .extra_ca_file
+        .as_deref()
+        .map(std::fs::read)
+        .transpose()
+        .map_err(BootstrapError::ExtraCa)?;
+    let resolver = AppBearerResolver::new(
+        &config.public_capture.api_base_url,
+        bearer_token,
+        extra_ca.as_deref(),
+    )
+    .map_err(|error| BootstrapError::PublicCapture(error.to_string()))?;
     let worker = PublicCaptureWorker::new(
         database.clone(),
         Arc::new(resolver),

@@ -38,6 +38,7 @@ uuid.workspace      = true
 [dev-dependencies]
 figment.workspace = true
 ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
+ratatoskr-x-sync = { workspace = true, features = ["test-support"] }
 ratatoskr-event-envelope.workspace = true
 ratatoskr-operation-contracts.workspace = true
 ratatoskr-social-contracts.workspace = true

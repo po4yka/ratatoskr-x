@@ -5,6 +5,8 @@
 
 use figment::Figment;
 use figment::providers::{Env, Serialized};
+use rustls_pki_types::CertificateDer;
+use rustls_pki_types::pem::PemObject as _;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ConfigError, Violations};
@@ -51,6 +53,11 @@ pub struct PublicCaptureConfig {
     pub batch_size: u32,
     /// Seconds between worker passes.
     pub poll_interval_seconds: u64,
+    /// Absolute path of an optional PEM file whose certificates the public-capture client trusts
+    /// in addition to the platform verifier's roots, for an operator behind a TLS-inspecting
+    /// proxy and for the native smoke against a loopback HTTPS fake. It applies to that client
+    /// only.
+    pub extra_ca_file: Option<String>,
 }
 
 /// Credential-protection settings.
@@ -228,6 +235,7 @@ impl Default for XConfig {
                 max_attempts: 5,
                 batch_size: 8,
                 poll_interval_seconds: 2,
+                extra_ca_file: None,
             },
         }
     }
@@ -388,5 +396,26 @@ fn validate_public_capture(config: &PublicCaptureConfig, violations: &mut Violat
     }
     if config.poll_interval_seconds == 0 {
         violations.push("public_capture.poll_interval_seconds must be at least 1");
+    }
+    if let Some(path) = &config.extra_ca_file {
+        validate_extra_ca_file(path, violations);
+    }
+}
+
+/// An extra trust anchor file must be an absolute path to a readable file holding at least one PEM
+/// certificate, so a typo fails at load instead of at the first capture.
+fn validate_extra_ca_file(path: &str, violations: &mut Violations) {
+    if !path.starts_with('/') {
+        violations.push("public_capture.extra_ca_file must be an absolute path");
+        return;
+    }
+    match std::fs::read(path) {
+        Err(_) => violations.push("public_capture.extra_ca_file must be a readable file"),
+        Ok(bytes) => {
+            if !CertificateDer::pem_slice_iter(&bytes).any(|item| item.is_ok()) {
+                violations
+                    .push("public_capture.extra_ca_file must hold at least one PEM certificate");
+            }
+        }
     }
 }

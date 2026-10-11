@@ -22,6 +22,7 @@ use x_budget::gate::SystemClock;
 use x_capture::consume_browser_commands;
 use x_capture::relay::{JetStreamPublisher, OutboxRelay};
 use x_persistence::test_support::TestDatabase;
+use x_sync::test_support::TlsFake;
 use x_sync::{AppBearerResolver, CapturePolicy, PublicCaptureWorker};
 
 /// The scenarios share the `cmd.x.capture.requested.v1` subject, so they run one at a time.
@@ -132,7 +133,8 @@ async fn provision(
 /// Runs one command through the consumer, the worker and the relay; returns the outbox rows in
 /// creation order with the stored messages the broker holds for them.
 async fn run_scenario(
-    api: &MockServer,
+    api_base_url: &str,
+    extra_ca_pem: Option<&[u8]>,
     owner: uuid::Uuid,
 ) -> Vec<(uuid::Uuid, String, EventEnvelope)> {
     let test = TestDatabase::create().await.expect("a disposable database");
@@ -177,7 +179,8 @@ async fn run_scenario(
     })
     .await;
 
-    let resolver = AppBearerResolver::new(&api.uri(), "end-to-end-token").expect("the resolver");
+    let resolver = AppBearerResolver::new(api_base_url, "end-to-end-token", extra_ca_pem)
+        .expect("the resolver");
     let worker = PublicCaptureWorker::new(
         test.database.clone(),
         Arc::new(resolver),
@@ -268,14 +271,16 @@ fn report(envelope: &EventEnvelope) -> OperationReported {
     envelope.payload_as().expect("an operation report")
 }
 
-#[tokio::test]
-async fn a_public_post_is_queued_preserved_and_reported_through_the_broker() {
-    let _one = ONE_AT_A_TIME.lock().await;
-    let api = x_api(ResponseTemplate::new(200).set_body_json(public_post())).await;
-    let owner = uuid::Uuid::now_v7();
+/// One field of a serialized snapshot; a missing field is a test failure.
+fn field(snapshot: &serde_json::Value, name: &str) -> serde_json::Value {
+    snapshot
+        .get(name)
+        .cloned()
+        .expect("the snapshot field exists")
+}
 
-    let held = run_scenario(&api, owner).await;
-
+/// The queued report, the social fact and the terminal `succeeded` report, in that order.
+fn assert_captured_and_reported(held: &[(uuid::Uuid, String, EventEnvelope)], owner: uuid::Uuid) {
     let types: Vec<&str> = held.iter().map(|(_, kind, _)| kind.as_str()).collect();
     assert_eq!(
         types,
@@ -286,7 +291,7 @@ async fn a_public_post_is_queued_preserved_and_reported_through_the_broker() {
         ],
         "queued report, the social fact, the terminal report"
     );
-    for (id, _, envelope) in &held {
+    for (id, _, envelope) in held {
         assert_eq!(envelope.event_id.0, *id, "the row id is the event id");
         assert_eq!(envelope.producer.as_str(), "ratatoskr-x");
         assert_eq!(
@@ -303,9 +308,10 @@ async fn a_public_post_is_queued_preserved_and_reported_through_the_broker() {
         .payload_as()
         .expect("a captured fact");
     let snapshot = serde_json::to_value(captured.source).expect("the snapshot serializes");
-    assert_eq!(snapshot["owner"], format!("user:{owner}"));
-    assert_eq!(snapshot["external_post_id"], POST);
-    assert_eq!(snapshot["text"], "One public post, end to end.");
+    let snapshot_field = |name: &str| field(&snapshot, name);
+    assert_eq!(snapshot_field("owner"), format!("user:{owner}"));
+    assert_eq!(snapshot_field("external_post_id"), POST);
+    assert_eq!(snapshot_field("text"), "One public post, end to end.");
     let succeeded = report(&held.get(2).expect("the element exists").2);
     assert_eq!(succeeded.status, OperationStatus::Succeeded);
     assert_eq!(queued.operation_id, succeeded.operation_id);
@@ -318,10 +324,21 @@ async fn a_public_post_is_queued_preserved_and_reported_through_the_broker() {
             .to_wire(),
         format!(
             "social_source:{}",
-            snapshot["social_source_id"].as_str().expect("an id")
+            snapshot_field("social_source_id").as_str().expect("an id")
         ),
         "the terminal report points at the fact's source"
     );
+}
+
+#[tokio::test]
+async fn a_public_post_is_queued_preserved_and_reported_through_the_broker() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let api = x_api(ResponseTemplate::new(200).set_body_json(public_post())).await;
+    let owner = uuid::Uuid::now_v7();
+
+    let held = run_scenario(&api.uri(), None, owner).await;
+
+    assert_captured_and_reported(&held, owner);
 }
 
 #[tokio::test]
@@ -330,7 +347,7 @@ async fn a_post_the_app_may_not_read_is_reported_unavailable_with_no_social_fact
     let api = x_api(ResponseTemplate::new(200).set_body_json(not_authorized())).await;
     let owner = uuid::Uuid::now_v7();
 
-    let held = run_scenario(&api, owner).await;
+    let held = run_scenario(&api.uri(), None, owner).await;
 
     let types: Vec<&str> = held.iter().map(|(_, kind, _)| kind.as_str()).collect();
     assert_eq!(
@@ -350,4 +367,23 @@ async fn a_post_the_app_may_not_read_is_reported_unavailable_with_no_social_fact
     let error = terminal.error.expect("a failed report carries its error");
     assert_eq!(error.code.as_str(), "social.source.unavailable");
     assert!(!error.retryable);
+}
+
+#[tokio::test]
+async fn the_success_leg_runs_over_https_with_a_private_ca() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let fake = TlsFake::start(public_post().to_string())
+        .await
+        .expect("the loopback HTTPS fake starts");
+    let owner = uuid::Uuid::now_v7();
+
+    let held = run_scenario(&fake.base_url(), Some(fake.ca_pem().as_bytes()), owner).await;
+
+    assert_captured_and_reported(&held, owner);
+    assert_eq!(fake.requests(), 1, "the lookup went over TLS to the fake");
+    assert_eq!(
+        fake.failed_handshakes(),
+        0,
+        "the fake's certificate was trusted"
+    );
 }

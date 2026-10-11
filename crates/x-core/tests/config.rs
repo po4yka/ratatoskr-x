@@ -275,3 +275,68 @@ fn a_configured_bus_requires_the_bearer_token_path() {
         "/run/secrets/ratatoskr-x-bearer"
     );
 }
+
+/// A throwaway self-signed certificate; only its PEM framing matters to the loader.
+const CERTIFICATE_PEM: &str = "-----BEGIN CERTIFICATE-----
+MIIBejCCASCgAwIBAgIUd3xNCkFrw39bCg8g3stNoCgC7jAwCgYIKoZIzj0EAwIw
+IjEgMB4GA1UEAwwXUmF0YXRvc2tyIFggY29uZmlnIHRlc3QwIBcNMjYxMDExMTEy
+MzMzWhgPMjEyNjA5MTcxMTIzMzNaMCIxIDAeBgNVBAMMF1JhdGF0b3NrciBYIGNv
+bmZpZyB0ZXN0MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEoRwL0r3xE0fQgHwO
+G0HIew5Oli4lfowu5TyChX36tyZ4XlTmyDFbkoYZgKDQuQH/6lMRGcmSlU4EV6fJ
+eMwkpKMyMDAwHQYDVR0OBBYEFEuleYd2/nD1rT0BsvbIEqWmewyXMA8GA1UdEwEB
+/wQFMAMBAf8wCgYIKoZIzj0EAwIDSAAwRQIgHUe5gv5mEk8POtOWi+O5Y/LrHSb6
+Jmtr1xbyREBMF00CIQDALZSV25I6Laka8zc2cBzQcfPFvCLzkUZpz75Syv5x1g==
+-----END CERTIFICATE-----
+";
+
+fn extra_ca_result(path: &str) -> Result<XConfig, ConfigError> {
+    XConfig::extract_from(&figment_with(&[(
+        "public_capture.extra_ca_file",
+        Value::from(path),
+    )]))
+}
+
+#[test]
+fn the_extra_ca_file_must_be_absolute_readable_and_hold_a_certificate() {
+    let directory =
+        std::env::temp_dir().join(format!("ratatoskr-x-extra-ca-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("a scratch directory");
+    let good = directory.join("good.pem");
+    let empty = directory.join("empty.pem");
+    let key_only = directory.join("key.pem");
+    std::fs::write(&good, CERTIFICATE_PEM).expect("the certificate file is written");
+    std::fs::write(&empty, "nothing here").expect("the text file is written");
+    std::fs::write(
+        &key_only,
+        "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
+    )
+    .expect("the key file is written");
+    let missing = directory.join("missing.pem");
+
+    for (label, path) in [
+        ("a relative path", "relative/ca.pem".to_owned()),
+        ("a missing file", missing.display().to_string()),
+        ("a file with no PEM", empty.display().to_string()),
+        ("a file with only a key", key_only.display().to_string()),
+    ] {
+        let error = extra_ca_result(&path).expect_err(label);
+        assert!(
+            error.report().contains("public_capture.extra_ca_file"),
+            "{label} is refused with the key named, got: {}",
+            error.report()
+        );
+    }
+
+    let accepted = extra_ca_result(&good.display().to_string()).expect("a certificate file loads");
+    assert_eq!(
+        accepted.public_capture.extra_ca_file.as_deref(),
+        Some(good.display().to_string().as_str())
+    );
+    let absent = XConfig::extract_from(&figment_with(&[])).expect("defaults must load");
+    assert_eq!(
+        absent.public_capture.extra_ca_file, None,
+        "absent changes nothing"
+    );
+
+    let _ = std::fs::remove_dir_all(&directory);
+}

@@ -33,9 +33,23 @@ tokio = { workspace = true, features = ["sync"] }
 tracing.workspace                   = true
 uuid.workspace                      = true
 
+[dependencies.rcgen]
+workspace = true
+optional  = true
+
+[dependencies.tokio-rustls]
+workspace = true
+optional  = true
+
+[features]
+# The loopback HTTPS fake that lets the public-capture client be tested with a private CA. Never
+# enabled by a service binary.
+test-support = ["dep:rcgen", "dep:tokio-rustls", "tokio/io-util", "tokio/net", "tokio/rt"]
+
 [dev-dependencies]
 metrics-exporter-prometheus.workspace = true
 ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
+ratatoskr-x-sync = { workspace = true, features = ["test-support"] }
 wiremock.workspace = true
 
 [lints]

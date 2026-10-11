@@ -82,6 +82,9 @@ pub enum PublicPostConfigError {
     /// The API base URL is not a URL.
     #[error("the public post API base URL is invalid")]
     BaseUrl,
+    /// The extra trust anchor bundle holds no readable certificate.
+    #[error("the extra CA bundle holds no certificate")]
+    CaBundle,
     /// The HTTP client could not be built.
     #[error("the public post HTTP client could not be built")]
     Client(#[source] reqwest::Error),
@@ -108,10 +111,24 @@ impl std::fmt::Debug for AppBearerResolver {
 impl AppBearerResolver {
     /// Builds the resolver with the production timeouts: 3 s to connect, 10 s in total.
     ///
+    /// `extra_ca_pem` is an optional PEM bundle whose certificates are trusted in addition to the
+    /// platform verifier's roots.
+    ///
     /// # Errors
-    /// When the base URL is not a URL or the HTTP client cannot be built.
-    pub fn new(api_base_url: &str, bearer_token: &str) -> Result<Self, PublicPostConfigError> {
-        Self::with_timeouts(api_base_url, bearer_token, CONNECT_TIMEOUT, TOTAL_TIMEOUT)
+    /// When the base URL is not a URL, the bundle holds no certificate, or the HTTP client cannot
+    /// be built.
+    pub fn new(
+        api_base_url: &str,
+        bearer_token: &str,
+        extra_ca_pem: Option<&[u8]>,
+    ) -> Result<Self, PublicPostConfigError> {
+        Self::with_timeouts(
+            api_base_url,
+            bearer_token,
+            CONNECT_TIMEOUT,
+            TOTAL_TIMEOUT,
+            extra_ca_pem,
+        )
     }
 
     /// Builds the resolver with explicit connect and total timeouts.
@@ -120,22 +137,34 @@ impl AppBearerResolver {
     /// decision, taken against its attempt budget.
     ///
     /// # Errors
-    /// When the base URL is not a URL or the HTTP client cannot be built.
+    /// When the base URL is not a URL, the bundle holds no certificate, or the HTTP client cannot
+    /// be built.
     pub fn with_timeouts(
         api_base_url: &str,
         bearer_token: &str,
         connect_timeout: Duration,
         total_timeout: Duration,
+        extra_ca_pem: Option<&[u8]>,
     ) -> Result<Self, PublicPostConfigError> {
         let endpoint = format!("{}/2/tweets", api_base_url.trim_end_matches('/'));
         reqwest::Url::parse(&endpoint).map_err(|_| PublicPostConfigError::BaseUrl)?;
-        let http = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .connect_timeout(connect_timeout)
             .timeout(total_timeout)
             .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .build()
-            .map_err(PublicPostConfigError::Client)?;
+            .retry(reqwest::retry::never());
+        if let Some(pem) = extra_ca_pem {
+            // `tls_certs_merge` adds the certificates to the platform verifier's roots;
+            // `tls_certs_only` would replace them, which an operator behind a TLS-inspecting
+            // proxy must not get (XR-021 CONTRACTS.md R3-15).
+            let certificates = reqwest::Certificate::from_pem_bundle(pem)
+                .map_err(|_| PublicPostConfigError::CaBundle)?;
+            if certificates.is_empty() {
+                return Err(PublicPostConfigError::CaBundle);
+            }
+            builder = builder.tls_certs_merge(certificates);
+        }
+        let http = builder.build().map_err(PublicPostConfigError::Client)?;
         Ok(Self {
             http,
             endpoint,

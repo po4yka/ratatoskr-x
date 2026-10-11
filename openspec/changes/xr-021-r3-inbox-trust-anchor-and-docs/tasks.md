@@ -5,8 +5,8 @@
 
 ## 2. A configured CA is trusted (R3-15 rule 1)
 
-- [ ] 2.1 Add `the_extra_ca_file_must_be_absolute_readable_and_hold_a_certificate`, `a_private_ca_is_trusted_only_when_configured`, `the_extra_ca_does_not_replace_the_platform_roots` and `the_success_leg_runs_over_https_with_a_private_ca`; run them RED, the key does not exist.
-- [ ] 2.2 Add `public_capture.extra_ca_file`, the resolver options and the wiring in `main` so they pass.
+- [x] 2.1 Add `the_extra_ca_file_must_be_absolute_readable_and_hold_a_certificate`, `a_private_ca_is_trusted_only_when_configured`, `the_extra_ca_does_not_replace_the_platform_roots` and `the_success_leg_runs_over_https_with_a_private_ca`; run them RED, the key does not exist.
+- [x] 2.2 Add `public_capture.extra_ca_file`, the resolver options and the wiring in `main` so they pass.
 
 ## 3. A terminal capture is terminal (R3-15 rule 2)
 

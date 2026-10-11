@@ -79,6 +79,12 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 uuid = { version = "1.24.1", features = ["v7"] }
 # Provider stubs for recorded-fixture tests only.
 wiremock = "0.6.5"
+# The loopback HTTPS fake of x-sync's `test-support` feature: a throwaway CA, a server certificate it
+# issues, and a TLS acceptor. Neither is compiled into a service binary.
+rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "pem"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws_lc_rs"] }
+# PEM parsing for the optional extra trust anchor file validated at configuration load.
+rustls-pki-types = { version = "1.15.1", features = ["std"] }
 # Property-based payload-shape variations; dev-dependency of x-normalize only.
 proptest = "1.11.0"
 

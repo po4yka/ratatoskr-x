@@ -25,6 +25,9 @@ pub enum BootstrapError {
     /// The public-capture bearer token file holds no token.
     #[error("the public-capture bearer token file is empty")]
     BearerTokenEmpty,
+    /// The extra CA file named by `public_capture.extra_ca_file` could not be read.
+    #[error("the public-capture extra CA file could not be read")]
+    ExtraCa(#[source] std::io::Error),
     /// The public post resolver could not be built.
     #[error("the public post resolver could not start: {0}")]
     PublicCapture(String),
@@ -42,7 +45,9 @@ impl BootstrapError {
     #[must_use]
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::Config(_) | Self::BearerToken(_) | Self::BearerTokenEmpty => 78,
+            Self::Config(_) | Self::BearerToken(_) | Self::BearerTokenEmpty | Self::ExtraCa(_) => {
+                78
+            }
             Self::Telemetry(_)
             | Self::Persistence(_)
             | Self::NatsSeed(_)

@@ -23,6 +23,10 @@ RATATOSKR__BUS__NKEY_SEED_PATH=/etc/ratatoskr/x.nkey
 # 78) without it whenever the bus is configured. Put the token alone in the file.
 RATATOSKR__PUBLIC_CAPTURE__BEARER_TOKEN_PATH=/etc/ratatoskr/x-public-capture.token
 RATATOSKR__PUBLIC_CAPTURE__API_BASE_URL=https://api.x.com
+# Optional. An absolute path to a PEM file whose certificates the public-capture client trusts in
+# addition to the host trust store, for an operator behind a TLS-inspecting proxy. It applies to
+# that client only. Leave it commented out otherwise.
+# RATATOSKR__PUBLIC_CAPTURE__EXTRA_CA_FILE=/etc/ratatoskr/x-extra-ca.pem
 # Resolution attempts before a transient failure becomes a terminal report, captures claimed per
 # pass, and the pause between passes.
 RATATOSKR__PUBLIC_CAPTURE__MAX_ATTEMPTS=5

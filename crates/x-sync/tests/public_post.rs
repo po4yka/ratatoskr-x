@@ -12,7 +12,8 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use serde_json::json;
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-use x_sync::{AppBearerResolver, PublicPostFailure, PublicPostResolver};
+use x_sync::test_support::TlsFake;
+use x_sync::{AppBearerResolver, PublicPostConfigError, PublicPostFailure, PublicPostResolver};
 
 const POST_ID: &str = "1900000000000000001";
 const TOKEN: &str = "app-only-test-token-0123456789";
@@ -23,6 +24,7 @@ fn resolver(server: &MockServer) -> AppBearerResolver {
         TOKEN,
         Duration::from_millis(500),
         Duration::from_millis(500),
+        None,
     )
     .expect("the resolver builds")
 }
@@ -188,6 +190,7 @@ async fn a_refused_connection_is_transient() {
         TOKEN,
         Duration::from_millis(500),
         Duration::from_millis(500),
+        None,
     )
     .expect("the resolver builds");
     let failure = resolver
@@ -269,4 +272,64 @@ async fn the_token_never_appears_in_debug_output_or_errors() {
         .expect_err("the credential is rejected");
     let failure = format!("{failure} {failure:?}");
     assert!(!failure.contains(TOKEN), "{failure}");
+}
+
+fn https_resolver(base_url: &str, extra_ca_pem: Option<&[u8]>) -> AppBearerResolver {
+    AppBearerResolver::with_timeouts(
+        base_url,
+        TOKEN,
+        Duration::from_secs(2),
+        Duration::from_secs(5),
+        extra_ca_pem,
+    )
+    .expect("the resolver builds")
+}
+
+#[tokio::test]
+async fn a_private_ca_is_trusted_only_when_configured() {
+    let fake = TlsFake::start(post_envelope().to_string())
+        .await
+        .expect("the loopback HTTPS fake starts");
+
+    let refused = https_resolver(&fake.base_url(), None)
+        .resolve(POST_ID)
+        .await
+        .expect_err("a certificate from an unknown CA is not trusted");
+    assert_eq!(refused, PublicPostFailure::Transient);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while fake.failed_handshakes() == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the server never recorded the failed handshake"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        fake.requests(),
+        0,
+        "no request crossed the untrusted handshake"
+    );
+
+    let post = https_resolver(&fake.base_url(), Some(fake.ca_pem().as_bytes()))
+        .resolve(POST_ID)
+        .await
+        .expect("the configured CA makes the certificate trusted");
+    assert_eq!(post.provider_id, POST_ID);
+    assert_eq!(fake.requests(), 1);
+}
+
+#[test]
+fn a_bundle_without_a_certificate_is_refused() {
+    for bundle in [
+        &b""[..],
+        b"not a certificate",
+        b"-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
+    ] {
+        let error = AppBearerResolver::new("https://api.x.com", TOKEN, Some(bundle))
+            .expect_err("a bundle needs at least one certificate");
+        assert!(
+            matches!(error, PublicPostConfigError::CaBundle),
+            "unexpected refusal: {error:?}"
+        );
+    }
 }
