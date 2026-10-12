@@ -276,18 +276,10 @@ fn a_configured_bus_requires_the_bearer_token_path() {
     );
 }
 
-/// A throwaway self-signed certificate; only its PEM framing matters to the loader.
-const CERTIFICATE_PEM: &str = "-----BEGIN CERTIFICATE-----
-MIIBejCCASCgAwIBAgIUd3xNCkFrw39bCg8g3stNoCgC7jAwCgYIKoZIzj0EAwIw
-IjEgMB4GA1UEAwwXUmF0YXRvc2tyIFggY29uZmlnIHRlc3QwIBcNMjYxMDExMTEy
-MzMzWhgPMjEyNjA5MTcxMTIzMzNaMCIxIDAeBgNVBAMMF1JhdGF0b3NrciBYIGNv
-bmZpZyB0ZXN0MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEoRwL0r3xE0fQgHwO
-G0HIew5Oli4lfowu5TyChX36tyZ4XlTmyDFbkoYZgKDQuQH/6lMRGcmSlU4EV6fJ
-eMwkpKMyMDAwHQYDVR0OBBYEFEuleYd2/nD1rT0BsvbIEqWmewyXMA8GA1UdEwEB
-/wQFMAMBAf8wCgYIKoZIzj0EAwIDSAAwRQIgHUe5gv5mEk8POtOWi+O5Y/LrHSb6
-Jmtr1xbyREBMF00CIQDALZSV25I6Laka8zc2cBzQcfPFvCLzkUZpz75Syv5x1g==
------END CERTIFICATE-----
-";
+/// A throwaway self-signed certificate; only its PEM framing matters to the loader. It lives in its
+/// own fixture because fleet.yml's private-key scan fires on any file that carries both a private
+/// key header and a long base64 run, and this file names a key header for the key-only case below.
+const CERTIFICATE_PEM: &str = include_str!("fixtures/extra-ca.crt");
 
 fn extra_ca_result(path: &str) -> Result<XConfig, ConfigError> {
     XConfig::extract_from(&figment_with(&[(
