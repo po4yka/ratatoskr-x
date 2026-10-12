@@ -668,6 +668,28 @@ CREATE INDEX IF NOT EXISTS outbox_events_unpublished_idx
     ON x_archive.outbox_events (next_attempt_at, created_at, id)
     WHERE published_at IS NULL AND undeliverable_at IS NULL;
 
+-- A removal that Knowledge has not acknowledged is the only copy of the deletion this service can
+-- send again (XR-021 CONTRACTS.md R5-11), so no statement may delete it: not a retention sweep, not
+-- a privacy deletion, not the transition CLI. A sweep that must run adds the predicate
+-- `NOT (event_type = 'social.source.removed.v1' AND acknowledged_at IS NULL)`.
+CREATE OR REPLACE FUNCTION x_archive.refuse_unacknowledged_removal_delete()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF OLD.event_type = 'social.source.removed.v1' AND OLD.acknowledged_at IS NULL THEN
+        RAISE EXCEPTION 'outbox row % is a removal that Knowledge has not acknowledged', OLD.id
+            USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN OLD;
+END
+$$;
+
+DROP TRIGGER IF EXISTS outbox_events_keep_unacknowledged_removal ON x_archive.outbox_events;
+CREATE TRIGGER outbox_events_keep_unacknowledged_removal
+    BEFORE DELETE ON x_archive.outbox_events
+    FOR EACH ROW EXECUTE FUNCTION x_archive.refuse_unacknowledged_removal_delete();
+
 -- The resend pass and the tombstone gauges read only the removals Knowledge has not acknowledged.
 CREATE INDEX IF NOT EXISTS outbox_events_unacknowledged_removal_idx
     ON x_archive.outbox_events (next_resend_at, created_at)

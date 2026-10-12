@@ -14,8 +14,8 @@
 
 ## 3. A removal is never dropped while unacknowledged
 
-- [ ] 3.1 Add the delete-guard tests to `crates/x-persistence/tests/schema.rs`; run them RED, the delete succeeds today. The repository has no code that deletes outbox rows, so the guard lives in the database.
-- [ ] 3.2 Add the `before delete` trigger to `schema.sql` so the tests pass.
+- [x] 3.1 Add the delete-guard tests to `crates/x-persistence/tests/schema.rs`; run them RED, the delete succeeds today. The repository has no code that deletes outbox rows, so the guard lives in the database.
+- [x] 3.2 Add the `before delete` trigger to `schema.sql` so the tests pass.
 
 ## 4. Gate
 
