@@ -10,12 +10,14 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_nats::jetstream;
 use uuid::Uuid;
 use x_capture::relay::{
     JetStreamPublisher, OutboxPublisher, OutboxRelay, PublishFailure, RelayError, subject_for,
 };
+use x_persistence::outbox::ResendPolicy;
 use x_persistence::test_support::TestDatabase;
 
 const ALLOWED: [&str; 5] = [
@@ -25,6 +27,11 @@ const ALLOWED: [&str; 5] = [
     "social.source.removed.v1",
     "content.capture.requested.v1",
 ];
+
+/// Removals are not acknowledged in these tests, so the resend schedule only has to exist.
+fn resend_policy() -> ResendPolicy {
+    ResendPolicy::new(Duration::from_secs(600), Duration::from_secs(21_600))
+}
 
 async fn insert_row(test: &TestDatabase, event_type: &str, ordinal: u32) -> Uuid {
     let id = Uuid::now_v7();
@@ -155,6 +162,7 @@ async fn rows_publish_in_creation_order_to_their_subjects_with_the_row_id_as_mes
     let relay = OutboxRelay::new(
         test.database.clone(),
         Arc::new(JetStreamPublisher::new(context.clone())),
+        resend_policy(),
     );
 
     let report = relay.run_once().await.expect("the pass completes");
@@ -209,7 +217,7 @@ async fn a_failed_publish_marks_nothing_stops_the_pass_and_a_later_pass_skips_th
         failing: Mutex::new(HashMap::from([(head, "ack_timeout")])),
         calls: Mutex::new(Vec::new()),
     });
-    let relay = OutboxRelay::new(test.database.clone(), publisher.clone());
+    let relay = OutboxRelay::new(test.database.clone(), publisher.clone(), resend_policy());
 
     let first = relay.run_once().await.expect("the pass completes");
     assert_eq!((first.published, first.failed), (0, 1));
@@ -281,7 +289,7 @@ async fn an_unmappable_event_type_stops_the_relay_instead_of_being_skipped() {
         failing: Mutex::new(HashMap::new()),
         calls: Mutex::new(Vec::new()),
     });
-    let relay = OutboxRelay::new(test.database.clone(), publisher.clone());
+    let relay = OutboxRelay::new(test.database.clone(), publisher.clone(), resend_policy());
 
     let error = relay
         .run_once()
@@ -392,7 +400,7 @@ async fn repeated_refusals_mark_the_relay_unhealthy_until_a_clean_pass() {
     let test = TestDatabase::create().await.expect("a disposable database");
     let head = insert_fresh_row(&test).await;
     let publisher = scripted(&test, &[(head, "ack_timeout")]);
-    let relay = OutboxRelay::new(test.database.clone(), publisher.clone());
+    let relay = OutboxRelay::new(test.database.clone(), publisher.clone(), resend_policy());
     let health = relay.health();
     assert!(health.is_healthy(), "a new relay is healthy");
 
@@ -428,7 +436,7 @@ async fn a_failing_row_stays_unhealthy_while_it_is_backed_off() {
     let test = TestDatabase::create().await.expect("a disposable database");
     let head = insert_fresh_row(&test).await;
     let publisher = scripted(&test, &[(head, "ack_timeout")]);
-    let relay = OutboxRelay::new(test.database.clone(), publisher);
+    let relay = OutboxRelay::new(test.database.clone(), publisher, resend_policy());
     let health = relay.health();
     for _ in 0..3 {
         relay.run_once().await.expect("the pass completes");
@@ -457,7 +465,7 @@ async fn a_row_that_keeps_failing_for_five_minutes_marks_the_relay_unhealthy() {
     let test = TestDatabase::create().await.expect("a disposable database");
     let old = insert_row(&test, "social.source.captured.v1", 0).await;
     let publisher = scripted(&test, &[(old, "ack_timeout")]);
-    let relay = OutboxRelay::new(test.database.clone(), publisher);
+    let relay = OutboxRelay::new(test.database.clone(), publisher, resend_policy());
     let health = relay.health();
 
     relay.run_once().await.expect("the pass completes");
@@ -476,7 +484,7 @@ async fn an_oversize_body_is_undeliverable_and_later_rows_publish() {
     let oversize = insert_fresh_row(&test).await;
     let later = insert_fresh_row(&test).await;
     let publisher = scripted(&test, &[(oversize, "payload_too_large")]);
-    let relay = OutboxRelay::new(test.database.clone(), publisher.clone());
+    let relay = OutboxRelay::new(test.database.clone(), publisher.clone(), resend_policy());
 
     let report = relay.run_once().await.expect("the pass completes");
 

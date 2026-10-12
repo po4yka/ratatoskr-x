@@ -36,4 +36,13 @@ RATATOSKR__PUBLIC_CAPTURE__MAX_ATTEMPTS=5
 RATATOSKR__PUBLIC_CAPTURE__BATCH_SIZE=8
 RATATOSKR__PUBLIC_CAPTURE__POLL_INTERVAL_SECONDS=2
 
+# A social.source.removed.v1 fact is kept and published again until Knowledge acknowledges it, because
+# the events stream drops its oldest messages after 7 days or at 1 GiB. The first copy is sent
+# RESEND_AFTER_SECONDS after the original (30 to 86400), and each later wait doubles up to
+# RESEND_CAP_SECONDS (at least RESEND_AFTER_SECONDS, at most 604800). The stream collapses a repeated
+# message id inside its 120 second duplicate window, so a delay below 120 only changes the log; the
+# default 600 is deliberate and 30 exists for tests.
+RATATOSKR__TOMBSTONE__RESEND_AFTER_SECONDS=600
+RATATOSKR__TOMBSTONE__RESEND_CAP_SECONDS=21600
+
 RATATOSKR__TELEMETRY__LOG_FORMAT=json

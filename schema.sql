@@ -651,12 +651,27 @@ CREATE TABLE IF NOT EXISTS x_archive.outbox_events (
     -- Set when the body can never be delivered (larger than the broker's `max_payload`): the
     -- relay never selects the row again and the row never counts against relay health
     -- (XR-021 CONTRACTS.md R2-04).
-    undeliverable_at timestamptz
+    undeliverable_at timestamptz,
+    -- Removal acknowledgement (XR-021 CONTRACTS.md R5-11). Only `social.source.removed.v1` rows use
+    -- these four columns. The `ratatoskr_events` stream drops its oldest messages, so a removal that
+    -- Knowledge has not acknowledged is published again, unchanged, until `acknowledged_at` is set:
+    -- `next_resend_at` is when the next copy is due (armed when the row is marked published),
+    -- `resend_count` doubles the delay up to the configured cap, and `ack_outcome` records what
+    -- Knowledge did (`refused` stops the resend too, and an operator must look).
+    acknowledged_at timestamptz,
+    ack_outcome     text CHECK (ack_outcome IN ('applied', 'refused')),
+    resend_count    integer NOT NULL DEFAULT 0 CHECK (resend_count >= 0),
+    next_resend_at  timestamptz
 );
 
 CREATE INDEX IF NOT EXISTS outbox_events_unpublished_idx
     ON x_archive.outbox_events (next_attempt_at, created_at, id)
     WHERE published_at IS NULL AND undeliverable_at IS NULL;
+
+-- The resend pass and the tombstone gauges read only the removals Knowledge has not acknowledged.
+CREATE INDEX IF NOT EXISTS outbox_events_unacknowledged_removal_idx
+    ON x_archive.outbox_events (next_resend_at, created_at)
+    WHERE event_type = 'social.source.removed.v1' AND acknowledged_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS x_archive.inbox_events (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),

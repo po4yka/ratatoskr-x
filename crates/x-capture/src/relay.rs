@@ -6,6 +6,12 @@
 //! row id as `Nats-Msg-Id`, and marks `published_at` only after the broker acknowledged the
 //! message. A row it cannot map is a programming error: the relay stops instead of skipping it.
 //!
+//! A removal is the one fact that is also kept (CONTRACTS.md R5-11): the events stream drops its
+//! oldest messages, so a `social.source.removed.v1` row that Knowledge has not acknowledged is
+//! published again, unchanged and under the same `Nats-Msg-Id`, with a delay that doubles up to a
+//! cap, until `acknowledged_at` is set. A republish never touches `published_at` and never counts
+//! against relay health.
+//!
 //! A relay that keeps running but cannot publish is not healthy (CONTRACTS.md R2-03): [`RelayHealth`]
 //! turns unhealthy once a publishable row has been refused repeatedly, and the service feeds it
 //! into readiness. A body larger than the broker accepts can never be delivered, so it is marked
@@ -19,6 +25,9 @@ use std::time::Duration;
 
 use async_nats::jetstream;
 use x_persistence::database::Database;
+use x_persistence::outbox::{
+    self, REMOVAL_EVENT_TYPE, ResendPolicy, mark_published, record_resend, unacknowledged_removals,
+};
 
 /// Rows one pass publishes at most.
 const BATCH_SIZE: i64 = 32;
@@ -190,6 +199,8 @@ pub struct RelayReport {
     pub published: u32,
     /// Rows whose publish failed (a pass stops at the first one).
     pub failed: u32,
+    /// Removals published again because Knowledge had not acknowledged them.
+    pub resent: u32,
     /// Rows marked undeliverable.
     pub undeliverable: u32,
 }
@@ -205,6 +216,9 @@ pub enum RelayError {
     /// A database statement failed.
     #[error("the outbox relay database statement failed")]
     Query(#[source] sqlx::Error),
+    /// A shared outbox transition failed.
+    #[error("the outbox relay could not record a transition")]
+    Transition(#[source] outbox::OutboxError),
 }
 
 /// Publishes unpublished outbox rows in creation order.
@@ -213,6 +227,7 @@ pub struct OutboxRelay {
     database: Database,
     publisher: Arc<dyn OutboxPublisher>,
     health: RelayHealth,
+    resend: ResendPolicy,
 }
 
 impl std::fmt::Debug for OutboxRelay {
@@ -224,13 +239,19 @@ impl std::fmt::Debug for OutboxRelay {
 }
 
 impl OutboxRelay {
-    /// Builds a relay over the outbox and a publisher.
+    /// Builds a relay over the outbox and a publisher. `resend` says how long a published removal
+    /// waits for Knowledge's acknowledgement before it is published again.
     #[must_use]
-    pub fn new(database: Database, publisher: Arc<dyn OutboxPublisher>) -> Self {
+    pub fn new(
+        database: Database,
+        publisher: Arc<dyn OutboxPublisher>,
+        resend: ResendPolicy,
+    ) -> Self {
         Self {
             database,
             publisher,
             health: RelayHealth::new(),
+            resend,
         }
     }
 
@@ -249,8 +270,8 @@ impl OutboxRelay {
     /// [`RelayHealth`].
     ///
     /// # Errors
-    /// [`RelayError::UnmappableEventType`] for a row with no subject; [`RelayError::Query`] when
-    /// the outbox cannot be read or updated.
+    /// [`RelayError::UnmappableEventType`] for a row with no subject; [`RelayError::Query`] or
+    /// [`RelayError::Transition`] when the outbox cannot be read or updated.
     pub async fn run_once(&self) -> Result<RelayReport, RelayError> {
         let rows: Vec<(sqlx::types::Uuid, String, String)> = sqlx::query_as(
             "select id, event_type, payload::text from x_archive.outbox_events \
@@ -273,7 +294,9 @@ impl OutboxRelay {
                 .await
             {
                 Ok(()) => {
-                    self.mark_published(id).await?;
+                    mark_published(self.database.pool(), id, self.resend)
+                        .await
+                        .map_err(RelayError::Transition)?;
                     report.published += 1;
                 }
                 Err(failure) if failure.is_permanent() => {
@@ -298,13 +321,17 @@ impl OutboxRelay {
                         %event_type,
                         "the outbox relay could not publish a row; it is backed off"
                     );
-                    self.record_failure(id, failure).await?;
+                    self.record_failure(id, failure, false).await?;
                     report.failed += 1;
                     break;
                 }
             }
         }
+        if report.failed == 0 {
+            self.resend_unacknowledged(&mut report).await?;
+        }
         self.refresh_health().await?;
+        self.refresh_tombstone_gauges().await?;
         Ok(report)
     }
 
@@ -357,15 +384,64 @@ impl OutboxRelay {
         Ok(())
     }
 
-    async fn mark_published(&self, id: sqlx::types::Uuid) -> Result<(), RelayError> {
-        sqlx::query(
-            "update x_archive.outbox_events set published_at = now(), last_error = null \
-              where id = $1 and published_at is null",
+    /// Publishes the stored bytes of every due, unacknowledged removal again and schedules the
+    /// next copy. Stops at the first refusal, as the fresh rows do; the refusal is backed off on
+    /// `next_attempt_at` and leaves the resend schedule alone.
+    async fn resend_unacknowledged(&self, report: &mut RelayReport) -> Result<(), RelayError> {
+        let due: Vec<(sqlx::types::Uuid, String)> = sqlx::query_as(
+            "select id, payload::text from x_archive.outbox_events \
+              where event_type = $1 and published_at is not null and acknowledged_at is null \
+                and next_resend_at <= now() and next_attempt_at <= now() \
+              order by next_resend_at, id limit $2",
         )
-        .bind(id)
-        .execute(self.database.pool())
+        .bind(REMOVAL_EVENT_TYPE)
+        .bind(BATCH_SIZE)
+        .fetch_all(self.database.pool())
         .await
         .map_err(RelayError::Query)?;
+        for (id, payload) in due {
+            let Some(subject) = subject_for(REMOVAL_EVENT_TYPE) else {
+                return Err(RelayError::UnmappableEventType(
+                    REMOVAL_EVENT_TYPE.to_owned(),
+                ));
+            };
+            match self
+                .publisher
+                .publish(&subject, &id.to_string(), payload.into_bytes())
+                .await
+            {
+                Ok(()) => {
+                    record_resend(self.database.pool(), id, self.resend)
+                        .await
+                        .map_err(RelayError::Transition)?;
+                    metrics::counter!("x_tombstone_resent_total").increment(1);
+                    report.resent += 1;
+                }
+                Err(failure) => {
+                    tracing::warn!(
+                        %failure,
+                        row_id = %id,
+                        "the outbox relay could not publish a removal again; it is backed off"
+                    );
+                    self.record_failure(id, failure, true).await?;
+                    report.failed += 1;
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Publishes the two gauges that tell an operator Knowledge has not answered. They never
+    /// feed readiness: a Knowledge outage must not make X unready.
+    async fn refresh_tombstone_gauges(&self) -> Result<(), RelayError> {
+        let waiting = unacknowledged_removals(self.database.pool())
+            .await
+            .map_err(RelayError::Transition)?;
+        let count = u32::try_from(waiting.count).map_or(f64::from(u32::MAX), f64::from);
+        metrics::gauge!("x_unacknowledged_tombstones").set(count);
+        metrics::gauge!("x_oldest_unacknowledged_tombstone_age_seconds")
+            .set(waiting.oldest_age_seconds);
         Ok(())
     }
 
@@ -387,20 +463,24 @@ impl OutboxRelay {
         Ok(())
     }
 
+    /// Backs a refused row off on `next_attempt_at`. `republish` says the row is a published
+    /// removal being sent again: it is backed off all the same, and `published_at` is untouched.
     async fn record_failure(
         &self,
         id: sqlx::types::Uuid,
         failure: PublishFailure,
+        republish: bool,
     ) -> Result<(), RelayError> {
         sqlx::query(
             "update x_archive.outbox_events \
                 set attempt_count = attempt_count + 1, last_error = $2, \
                     next_attempt_at = now() + least(300, 10 * (1 << least(attempt_count + 1, 5))) \
                                               * interval '1 second' \
-              where id = $1 and published_at is null",
+              where id = $1 and (published_at is null) <> $3",
         )
         .bind(id)
         .bind(failure.class)
+        .bind(republish)
         .execute(self.database.pool())
         .await
         .map_err(RelayError::Query)?;

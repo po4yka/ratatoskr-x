@@ -21,9 +21,15 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use x_budget::gate::SystemClock;
 use x_capture::consume_browser_commands;
 use x_capture::relay::{JetStreamPublisher, OutboxRelay};
+use x_persistence::outbox::ResendPolicy;
 use x_persistence::test_support::TestDatabase;
 use x_sync::test_support::TlsFake;
 use x_sync::{AppBearerResolver, CapturePolicy, PublicCaptureWorker};
+
+/// Removals are not acknowledged in this test, so the resend schedule only has to exist.
+fn resend_policy() -> ResendPolicy {
+    ResendPolicy::new(Duration::from_secs(600), Duration::from_secs(21_600))
+}
 
 /// The scenarios share the `cmd.x.capture.requested.v1` subject, so they run one at a time.
 static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -196,6 +202,7 @@ async fn run_scenario(
     let relay = OutboxRelay::new(
         test.database.clone(),
         Arc::new(JetStreamPublisher::new(context.clone())),
+        resend_policy(),
     );
     let relayed = relay.run_once().await.expect("the relay pass completes");
 

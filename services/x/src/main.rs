@@ -15,6 +15,7 @@ use x_budget::gate::SystemClock;
 use x_core::config::XConfig;
 use x_http::admin::{RuntimeState, admin_router};
 use x_persistence::database::Database;
+use x_persistence::outbox::ResendPolicy;
 use x_sync::{AppBearerResolver, CapturePolicy, PublicCaptureWorker};
 
 /// How long the admin listener keeps answering `503` after a bus task stopped, so a readiness
@@ -176,6 +177,10 @@ fn spawn_bus_tasks(
     let relay = x_capture::relay::OutboxRelay::new(
         database.clone(),
         Arc::new(x_capture::relay::JetStreamPublisher::new(context.clone())),
+        ResendPolicy::new(
+            Duration::from_secs(config.tombstone.resend_after_seconds),
+            Duration::from_secs(config.tombstone.resend_cap_seconds),
+        ),
     );
     let poll_interval = Duration::from_secs(config.public_capture.poll_interval_seconds);
     let mut tasks = JoinSet::new();

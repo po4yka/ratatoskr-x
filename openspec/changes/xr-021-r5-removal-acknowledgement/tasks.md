@@ -4,8 +4,8 @@
 
 ## 1. State machine and relay (R5-11 rule 4)
 
-- [ ] 1.1 Add `crates/x-persistence/tests/removal_ack.rs` and the resend cases of `crates/x-capture/tests/outbox_relay.rs`, with the four columns in `schema.sql` and signature-only stubs of the transitions; run them RED, each fails on an assertion (no `next_resend_at` armed, no resend selected, no acknowledgement recorded).
-- [ ] 1.2 Implement the transitions in `x-persistence/src/outbox.rs`, the resend selection and bookkeeping in `relay.rs`, the `ResendPolicy` constructor argument and the `tombstone` configuration keys so the tests pass.
+- [x] 1.1 Add `crates/x-persistence/tests/removal_ack.rs` and the resend cases of `crates/x-capture/tests/outbox_relay.rs`, with the four columns in `schema.sql` and signature-only stubs of the transitions; run them RED, each fails on an assertion (no `next_resend_at` armed, no resend selected, no acknowledgement recorded).
+- [x] 1.2 Implement the transitions in `x-persistence/src/outbox.rs`, the resend selection and bookkeeping in `relay.rs`, the `ResendPolicy` constructor argument and the `tombstone` configuration keys so the tests pass.
 
 ## 2. The consumer (R5-11 rules 3 and 4)
 

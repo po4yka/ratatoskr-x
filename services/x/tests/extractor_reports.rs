@@ -17,8 +17,14 @@ use ratatoskr_x::extractor_reports::{
 };
 use x_capture::relay::{JetStreamPublisher, OutboxRelay};
 use x_persistence::database::Database;
+use x_persistence::outbox::ResendPolicy;
 use x_persistence::test_support::TestDatabase;
 use x_sync::ArticleCaptureService;
+
+/// Removals are not acknowledged in this test, so the resend schedule only has to exist.
+fn resend_policy() -> ResendPolicy {
+    ResendPolicy::new(Duration::from_secs(600), Duration::from_secs(21_600))
+}
 
 struct Fixture {
     test: TestDatabase,
@@ -204,6 +210,7 @@ async fn a_relayed_article_capture_completes_from_the_extractor_report() {
     let relay = OutboxRelay::new(
         fixture.test.database.clone(),
         Arc::new(JetStreamPublisher::new(fixture.context.clone())),
+        resend_policy(),
     );
     let relayed = relay.run_once().await.expect("the relay pass completes");
     assert_eq!(

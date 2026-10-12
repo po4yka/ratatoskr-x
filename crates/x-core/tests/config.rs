@@ -332,3 +332,56 @@ fn the_extra_ca_file_must_be_absolute_readable_and_hold_a_certificate() {
 
     let _ = std::fs::remove_dir_all(&directory);
 }
+
+/// The resend timing of an unacknowledged removal (XR-021 CONTRACTS.md R5-11): 600 s and a 6 hour
+/// cap by default, and out-of-range values are refused together.
+#[test]
+fn tombstone_resend_defaults_and_bounds() {
+    let config = XConfig::extract_from(&figment_with(&[])).expect("defaults must load");
+    assert_eq!(config.tombstone.resend_after_seconds, 600);
+    assert_eq!(config.tombstone.resend_cap_seconds, 21_600);
+
+    for (after, cap) in [
+        (30_u64, 30_u64),
+        (86_400, 86_400),
+        (30, 604_800),
+        (600, 600),
+    ] {
+        let figment = figment_with(&[
+            ("tombstone.resend_after_seconds", Value::from(after)),
+            ("tombstone.resend_cap_seconds", Value::from(cap)),
+        ]);
+        XConfig::extract_from(&figment)
+            .unwrap_or_else(|error| panic!("{after}/{cap} is in range: {}", error.report()));
+    }
+
+    for (after, cap, reason) in [
+        (29_u64, 21_600_u64, "resend_after_seconds below 30"),
+        (86_401, 604_800, "resend_after_seconds above 86400"),
+        (600, 599, "resend_cap_seconds below resend_after_seconds"),
+        (600, 604_801, "resend_cap_seconds above 604800"),
+    ] {
+        let figment = figment_with(&[
+            ("tombstone.resend_after_seconds", Value::from(after)),
+            ("tombstone.resend_cap_seconds", Value::from(cap)),
+        ]);
+        let error = XConfig::extract_from(&figment)
+            .expect_err(&format!("{reason} must be refused ({after}/{cap})"));
+        assert!(
+            error.report().contains("tombstone."),
+            "{reason}: the rejection names the key, got: {}",
+            error.report()
+        );
+    }
+
+    let both = figment_with(&[
+        ("tombstone.resend_after_seconds", Value::from(1_u64)),
+        ("tombstone.resend_cap_seconds", Value::from(700_000_u64)),
+    ]);
+    let ConfigError::Invalid { violations } =
+        XConfig::extract_from(&both).expect_err("both are out of range")
+    else {
+        panic!("a semantic violation is Invalid");
+    };
+    assert_eq!(violations.len(), 2, "every violation is reported together");
+}

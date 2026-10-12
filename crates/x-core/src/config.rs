@@ -34,6 +34,22 @@ pub struct XConfig {
     pub bus: BusConfig,
     /// Public, app-only resolution of explicitly captured posts.
     pub public_capture: PublicCaptureConfig,
+    /// How long a published removal waits for Knowledge's acknowledgement before it is sent again.
+    pub tombstone: TombstoneConfig,
+}
+
+/// Resend timing of a `social.source.removed.v1` fact that Knowledge has not acknowledged
+/// (XR-021 CONTRACTS.md R5-11). The events stream collapses a repeated message id inside its
+/// 120 second duplicate window, so a resend sooner than that is a no-op at the broker: the
+/// default of 600 seconds is deliberate and the minimum of 30 seconds exists for tests.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TombstoneConfig {
+    /// Seconds before the first republish; each later delay doubles. 30 to 86400.
+    pub resend_after_seconds: u64,
+    /// The longest delay between two republishes in seconds: at least `resend_after_seconds`, at
+    /// most 604800.
+    pub resend_cap_seconds: u64,
 }
 
 /// Public, app-only resolution of explicitly captured posts (XR-021 CONTRACTS.md S10 CD5).
@@ -237,6 +253,10 @@ impl Default for XConfig {
                 poll_interval_seconds: 2,
                 extra_ca_file: None,
             },
+            tombstone: TombstoneConfig {
+                resend_after_seconds: 600,
+                resend_cap_seconds: 21_600,
+            },
         }
     }
 }
@@ -374,7 +394,22 @@ fn validate(config: &XConfig) -> Violations {
         violations.push("bus.events_stream_name must not be empty");
     }
     validate_public_capture(&config.public_capture, &mut violations);
+    validate_tombstone(&config.tombstone, &mut violations);
     violations
+}
+
+fn validate_tombstone(config: &TombstoneConfig, violations: &mut Violations) {
+    if !(30..=86_400).contains(&config.resend_after_seconds) {
+        violations.push("tombstone.resend_after_seconds must be between 30 and 86400");
+    }
+    if config.resend_cap_seconds < config.resend_after_seconds
+        || config.resend_cap_seconds > 604_800
+    {
+        violations.push(
+            "tombstone.resend_cap_seconds must be at least tombstone.resend_after_seconds and \
+             at most 604800",
+        );
+    }
 }
 
 fn validate_public_capture(config: &PublicCaptureConfig, violations: &mut Violations) {
