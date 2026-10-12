@@ -26,6 +26,9 @@ optional  = true
 test-support = ["dep:uuid"]
 
 [dev-dependencies]
+# The integration tests build disposable databases with the harness, so `cargo test -p` on this
+# crate alone enables it too.
+ratatoskr-x-persistence = { workspace = true, features = ["test-support"] }
 tokio.workspace = true
 uuid.workspace  = true
 

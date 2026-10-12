@@ -9,8 +9,8 @@
 
 ## 2. The consumer (R5-11 rules 3 and 4)
 
-- [ ] 2.1 Add `services/x/tests/deletion_acks.rs` (real broker, PostgreSQL) and the durable cases of `services/x/tests/bus_identity.rs`; run them RED against a signature-only `deletion_acks` module.
-- [ ] 2.2 Implement `services/x/src/deletion_acks.rs`, the gauges and the counter, the wiring in `main.rs`, the stanza in `deploy/nats/identity.conf`, and the README, DEVELOPMENT and conf-example text.
+- [x] 2.1 Add `services/x/tests/deletion_acks.rs` (real broker, PostgreSQL) and the durable cases of `services/x/tests/bus_identity.rs`; run them RED against a signature-only `deletion_acks` module.
+- [x] 2.2 Implement `services/x/src/deletion_acks.rs`, the gauges and the counter, the wiring in `main.rs`, the stanza in `deploy/nats/identity.conf`, and the README, DEVELOPMENT and conf-example text.
 
 ## 3. A removal is never dropped while unacknowledged
 

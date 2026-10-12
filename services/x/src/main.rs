@@ -8,6 +8,7 @@ use std::time::Duration;
 use async_nats::jetstream;
 use ratatoskr_x::bootstrap::BootstrapError;
 use ratatoskr_x::bus::connect_bus;
+use ratatoskr_x::deletion_acks;
 use ratatoskr_x::extractor_reports;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -139,6 +140,13 @@ async fn verify_durables(
         extractor_reports::DURABLE,
     )
     .await
+    .map_err(|error| BootstrapError::Nats(error.to_string()))?;
+    deletion_acks::ensure_acks_consumer(
+        context,
+        &config.bus.events_stream_name,
+        deletion_acks::DURABLE,
+    )
+    .await
     .map_err(|error| BootstrapError::Nats(error.to_string()))
 }
 
@@ -213,6 +221,25 @@ fn spawn_bus_tasks(
         .await;
         (
             "extractor_report_consumer",
+            result.map(drop).map_err(|e| e.to_string()),
+        )
+    });
+
+    // Readiness never depends on Knowledge answering: this task only fails when its durable is
+    // gone or its stream ends, like every other bus task.
+    let (acks, stream) = (context.clone(), config.bus.events_stream_name.clone());
+    let (db, signal) = (database.clone(), stopped(stop));
+    tasks.spawn(async move {
+        let result = deletion_acks::consume_deletion_acks(
+            &acks,
+            &db,
+            &stream,
+            deletion_acks::DURABLE,
+            signal,
+        )
+        .await;
+        (
+            "deletion_ack_consumer",
             result.map(drop).map_err(|e| e.to_string()),
         )
     });

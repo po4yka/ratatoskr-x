@@ -2455,6 +2455,7 @@ dependencies = [
  "chrono",
  "figment",
  "futures-util",
+ "metrics",
  "nkeys",
  "ratatoskr-event-envelope",
  "ratatoskr-operation-contracts",
@@ -2566,6 +2567,7 @@ name = "ratatoskr-x-persistence"
 version = "0.1.0"
 dependencies = [
  "ratatoskr-event-envelope",
+ "ratatoskr-x-persistence",
  "serde_json",
  "sqlx",
  "thiserror",

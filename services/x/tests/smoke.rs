@@ -16,10 +16,14 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use async_nats::jetstream;
+use support::{ACK_SUBJECT, Answer, removal_envelope};
 use x_persistence::test_support::TestDatabase;
+
+mod support;
 
 const HOST: &str = "127.0.0.1";
 const REPORTS_DURABLE: &str = "ratatoskr_x_extractor_reports";
+const DELETION_ACKS_DURABLE: &str = "ratatoskr_x_deletion_acks";
 
 /// Grabs an ephemeral port by binding and immediately releasing it.
 fn free_port() -> u16 {
@@ -161,6 +165,19 @@ async fn provision(client: async_nats::Client, consumer: &str) -> jetstream::str
         )
         .await
         .expect("the extractor-report durable exists");
+    events
+        .get_or_create_consumer(
+            DELETION_ACKS_DURABLE,
+            jetstream::consumer::pull::Config {
+                durable_name: Some(DELETION_ACKS_DURABLE.to_owned()),
+                filter_subject: "evt.knowledge.deletion.acknowledged.v1".to_owned(),
+                ack_policy: jetstream::consumer::AckPolicy::Explicit,
+                ack_wait: Duration::from_secs(30),
+                ..jetstream::consumer::pull::Config::default()
+            },
+        )
+        .await
+        .expect("the deletion-acknowledgement durable exists");
     commands
 }
 
@@ -554,6 +571,140 @@ async fn readiness_follows_the_relay() {
         );
         std::thread::sleep(Duration::from_millis(250));
     }
+
+    Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .expect("SIGTERM is delivered");
+    let status = wait_for_exit(&mut child, Duration::from_secs(30)).expect("the service stops");
+    assert!(status.success(), "graceful shutdown exits zero: {status:?}");
+    database
+        .cleanup()
+        .await
+        .expect("cleanup drops the database");
+    broker.cleanup();
+}
+
+/// The value of one unlabelled series in a Prometheus exposition.
+fn series(metrics: &str, name: &str) -> Option<f64> {
+    metrics.lines().find_map(|line| {
+        let (key, value) = line.split_once(' ')?;
+        (key == name).then(|| value.trim().parse().ok())?
+    })
+}
+
+fn body_of(response: &str) -> &str {
+    response.split_once("\r\n\r\n").map_or("", |(_, body)| body)
+}
+
+/// XR-021 CONTRACTS.md R5-11: a removal Knowledge never answers keeps X ready, and the two
+/// gauges show it until the acknowledgement arrives.
+#[tokio::test]
+async fn readiness_ignores_an_unanswered_removal_and_the_gauges_follow_it() {
+    let database = TestDatabase::create().await.expect("a disposable database");
+    let x_seed = nkeys::KeyPair::new_user();
+    let admin_seed = nkeys::KeyPair::new_user();
+    let consumer = format!("x_browser_capture_gauges_{}", uuid::Uuid::now_v7().simple());
+    let authorized =
+        AuthorizedBroker::start(&x_seed.public_key(), &admin_seed.public_key(), &consumer);
+    let admin = async_nats::ConnectOptions::with_nkey(admin_seed.seed().expect("a seed"))
+        .connect(authorized.url())
+        .await
+        .expect("the provisioning identity connects");
+    let broker = Broker {
+        nats_url: authorized.url(),
+        seed_path: std::env::temp_dir()
+            .join(format!("ratatoskr-x-gauges-{}.nkey", uuid::Uuid::now_v7())),
+        token_path: std::env::temp_dir()
+            .join(format!("ratatoskr-x-gauges-{}.token", uuid::Uuid::now_v7())),
+        consumer,
+    };
+    provision(admin.clone(), &broker.consumer).await;
+    std::fs::write(&broker.seed_path, x_seed.seed().expect("a seed")).expect("the seed is written");
+    std::fs::write(&broker.token_path, "app-only-smoke-token\n").expect("the token is written");
+    let port = free_port();
+    let mut child = spawn_service(&database, &broker, port, true);
+    assert!(wait_for_port(port), "the service starts listening");
+    let started = Instant::now();
+    while try_status(port, "/health/ready").as_deref() != Some("HTTP/1.1 200 OK") {
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "the service becomes ready"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let removal = uuid::Uuid::now_v7();
+    sqlx::query(
+        "insert into x_archive.outbox_events (id, aggregate, event_type, payload) \
+         values ($1, $2, $3, $4::jsonb)",
+    )
+    .bind(removal)
+    .bind(format!("social_source:{removal}"))
+    .bind(support::REMOVAL)
+    .bind(removal_envelope(removal))
+    .execute(database.database.pool())
+    .await
+    .expect("the removal seeds");
+
+    let waiting = Instant::now();
+    let age = loop {
+        let metrics = http_get(port, "/metrics");
+        let body = body_of(&metrics);
+        if series(body, "x_unacknowledged_tombstones") == Some(1.0) {
+            let age = series(body, "x_oldest_unacknowledged_tombstone_age_seconds");
+            assert!(
+                age.is_some(),
+                "the age gauge is served beside the count:\n{body}"
+            );
+            break age.unwrap_or_default();
+        }
+        assert!(
+            waiting.elapsed() < Duration::from_secs(15),
+            "the count gauge never showed the unanswered removal:\n{body}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    assert!(age >= 0.0, "the age is not negative");
+    // Knowledge stays silent: the removal is published, kept, and the service stays ready.
+    std::thread::sleep(Duration::from_secs(3));
+    assert_eq!(
+        try_status(port, "/health/ready").as_deref(),
+        Some("HTTP/1.1 200 OK"),
+        "an unanswered removal never makes the service unready"
+    );
+    let (published, acknowledged): (bool, bool) = sqlx::query_as(
+        "select published_at is not null, acknowledged_at is not null \
+           from x_archive.outbox_events where id = $1",
+    )
+    .bind(removal)
+    .fetch_one(database.database.pool())
+    .await
+    .expect("the row is readable");
+    assert!(published && !acknowledged, "published and still waiting");
+
+    jetstream::new(admin)
+        .publish(ACK_SUBJECT, Answer::applied(removal).document().into())
+        .await
+        .expect("the acknowledgement publishes")
+        .await
+        .expect("the broker stores the acknowledgement");
+    let answered = Instant::now();
+    loop {
+        let metrics = http_get(port, "/metrics");
+        if series(body_of(&metrics), "x_unacknowledged_tombstones") == Some(0.0) {
+            break;
+        }
+        assert!(
+            answered.elapsed() < Duration::from_secs(15),
+            "the count gauge never returned to zero after the acknowledgement"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert_eq!(
+        try_status(port, "/health/ready").as_deref(),
+        Some("HTTP/1.1 200 OK")
+    );
 
     Command::new("kill")
         .args(["-TERM", &child.id().to_string()])
