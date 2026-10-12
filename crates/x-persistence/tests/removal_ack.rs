@@ -21,7 +21,7 @@ const OWNER: &str = "user:018f0000-0000-7000-8000-000000000005";
 const OTHER_OWNER: &str = "user:018f0000-0000-7000-8000-000000000006";
 
 fn policy() -> ResendPolicy {
-    ResendPolicy::new(Duration::from_secs(600), Duration::from_secs(3_000))
+    ResendPolicy::new(Duration::from_mins(10), Duration::from_mins(50))
 }
 
 async fn insert_row(test: &TestDatabase, event_type: &str, tenant: &str) -> Uuid {

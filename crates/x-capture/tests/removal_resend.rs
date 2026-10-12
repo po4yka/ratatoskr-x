@@ -22,7 +22,7 @@ const OWNER: &str = "user:018f0000-0000-7000-8000-000000000005";
 const REMOVAL: &str = "social.source.removed.v1";
 
 fn policy() -> ResendPolicy {
-    ResendPolicy::new(Duration::from_secs(600), Duration::from_secs(3_000))
+    ResendPolicy::new(Duration::from_mins(10), Duration::from_mins(50))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

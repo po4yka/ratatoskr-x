@@ -185,8 +185,8 @@ impl Answer {
             "outcome": self.outcome,
             "acknowledged_at": "2026-10-12T08:00:02Z",
         });
-        if let Some(refusal) = self.refusal {
-            payload["refusal"] = serde_json::Value::from(refusal);
+        if let (Some(refusal), Some(object)) = (self.refusal, payload.as_object_mut()) {
+            object.insert("refusal".to_owned(), serde_json::Value::from(refusal));
         }
         serde_json::json!({
             "event_id": Uuid::now_v7(),

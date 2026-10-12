@@ -89,6 +89,24 @@ impl Running {
     }
 }
 
+/// The `Nats-Msg-Id` and bytes of the first `count` messages stored in the stream.
+async fn stored_copies(stream: &jetstream::stream::Stream, count: u64) -> Vec<(String, Vec<u8>)> {
+    let mut copies = Vec::new();
+    for sequence in 1..=count {
+        let raw = stream
+            .get_raw_message(sequence)
+            .await
+            .expect("the stored copy is readable");
+        let message_id = raw
+            .headers
+            .get(async_nats::header::NATS_MESSAGE_ID)
+            .expect("the copy carries a Nats-Msg-Id")
+            .to_string();
+        copies.push((message_id, raw.payload.to_vec()));
+    }
+    copies
+}
+
 /// Waits until the durable has acknowledged every message up to stream sequence `sequence`.
 async fn wait_until_consumed(
     context: &jetstream::Context,
@@ -227,6 +245,9 @@ impl LogBuffer {
     }
 }
 
+/// The refusal test installs telemetry once for the whole test binary.
+static TELEMETRY: OnceLock<(LogBuffer, x_telemetry::TelemetryGuard)> = OnceLock::new();
+
 fn install_telemetry() -> (LogBuffer, x_telemetry::TelemetryGuard) {
     let buffer = LogBuffer::default();
     let writer = buffer.clone();
@@ -237,17 +258,18 @@ fn install_telemetry() -> (LogBuffer, x_telemetry::TelemetryGuard) {
     (buffer, guard)
 }
 
-#[tokio::test]
-async fn an_unacknowledged_removal_is_published_again_until_knowledge_acknowledges_it() {
-    let keys = Keys::new();
-    let broker = Enforcing::start(&keys);
+/// Edge's and the service's `JetStream` contexts on a private broker whose events stream has a
+/// duplicate window of 200 ms, so a test can see the second copy of a message id in the stream. The
+/// production window is 120 s, which is why the production resend delay defaults to 600 s.
+async fn private_contexts(
+    keys: &Keys,
+    broker: &Enforcing,
+) -> (jetstream::Context, jetstream::Context) {
     let admin = async_nats::ConnectOptions::with_nkey(keys.admin.seed().expect("a seed"))
         .connect(broker.url())
         .await
         .expect("Edge connects");
     let edge = jetstream::new(admin);
-    // A duplicate window of 200 ms lets the test see the second copy in the stream; the production
-    // window is 120 s, which is why the production resend delay defaults to 600 s.
     let events = edge
         .get_or_create_stream(jetstream::stream::Config {
             name: EVENTS_STREAM.to_owned(),
@@ -275,7 +297,14 @@ async fn an_unacknowledged_removal_is_published_again_until_knowledge_acknowledg
     })
     .await
     .expect("the service connects under the X stanza");
-    let context = jetstream::new(client);
+    (edge, jetstream::new(client))
+}
+
+#[tokio::test]
+async fn an_unacknowledged_removal_is_published_again_until_knowledge_acknowledges_it() {
+    let keys = Keys::new();
+    let broker = Enforcing::start(&keys);
+    let (edge, context) = private_contexts(&keys, &broker).await;
     let test = TestDatabase::create().await.expect("a disposable database");
     let id = insert_removal(&test.database).await;
     let relay = OutboxRelay::new(
@@ -310,19 +339,7 @@ async fn an_unacknowledged_removal_is_published_again_until_knowledge_acknowledg
         .expect("the events stream is readable");
     let info = stream.info().await.expect("the stream has info");
     assert_eq!(info.state.messages, 2, "the stream holds both copies");
-    let mut copies = Vec::new();
-    for sequence in 1..=2 {
-        let raw = stream
-            .get_raw_message(sequence)
-            .await
-            .expect("the stored copy is readable");
-        let message_id = raw
-            .headers
-            .get(async_nats::header::NATS_MESSAGE_ID)
-            .expect("the copy carries a Nats-Msg-Id")
-            .to_string();
-        copies.push((message_id, raw.payload.to_vec()));
-    }
+    let copies = stored_copies(&stream, 2).await;
     assert_eq!(copies[0].0, id.to_string(), "the message id is the row id");
     assert_eq!(copies[0], copies[1], "same Nats-Msg-Id, same bytes");
     for (sequence, (message_id, _)) in (1..).zip(&copies) {
@@ -366,14 +383,13 @@ async fn an_unacknowledged_removal_is_published_again_until_knowledge_acknowledg
 #[tokio::test]
 async fn a_refused_acknowledgement_stops_the_resend_raises_an_error_and_counts() {
     let _serial = ONE_AT_A_TIME.lock().await;
-    static TELEMETRY: OnceLock<(LogBuffer, x_telemetry::TelemetryGuard)> = OnceLock::new();
     let (logs, guard) = TELEMETRY.get_or_init(install_telemetry);
     let fixture = fixture().await;
     let id = insert_removal(&fixture.test.database).await;
     let relay = OutboxRelay::new(
         fixture.test.database.clone(),
         Arc::new(JetStreamPublisher::new(fixture.context.clone())),
-        ResendPolicy::new(Duration::from_secs(600), Duration::from_secs(3_600)),
+        ResendPolicy::new(Duration::from_mins(10), Duration::from_hours(1)),
     );
     relay.run_once().await.expect("the removal is published");
     let consumer = Running::start(&fixture.context, &fixture.test.database, &fixture.durable);

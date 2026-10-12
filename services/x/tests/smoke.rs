@@ -597,6 +597,24 @@ fn body_of(response: &str) -> &str {
     response.split_once("\r\n\r\n").map_or("", |(_, body)| body)
 }
 
+/// Waits until `x_unacknowledged_tombstones` shows `count` and returns the age gauge beside it.
+fn wait_for_unacknowledged(port: u16, count: f64) -> f64 {
+    let started = Instant::now();
+    loop {
+        let metrics = http_get(port, "/metrics");
+        let body = body_of(&metrics);
+        if series(body, "x_unacknowledged_tombstones") == Some(count) {
+            return series(body, "x_oldest_unacknowledged_tombstone_age_seconds")
+                .unwrap_or_else(|| panic!("the age gauge is served beside the count:\n{body}"));
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "x_unacknowledged_tombstones never showed {count}:\n{body}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
 /// XR-021 CONTRACTS.md R5-11: a removal Knowledge never answers keeps X ready, and the two
 /// gauges show it until the acknowledgement arrives.
 #[tokio::test]
@@ -647,24 +665,7 @@ async fn readiness_ignores_an_unanswered_removal_and_the_gauges_follow_it() {
     .await
     .expect("the removal seeds");
 
-    let waiting = Instant::now();
-    let age = loop {
-        let metrics = http_get(port, "/metrics");
-        let body = body_of(&metrics);
-        if series(body, "x_unacknowledged_tombstones") == Some(1.0) {
-            let age = series(body, "x_oldest_unacknowledged_tombstone_age_seconds");
-            assert!(
-                age.is_some(),
-                "the age gauge is served beside the count:\n{body}"
-            );
-            break age.unwrap_or_default();
-        }
-        assert!(
-            waiting.elapsed() < Duration::from_secs(15),
-            "the count gauge never showed the unanswered removal:\n{body}"
-        );
-        std::thread::sleep(Duration::from_millis(200));
-    };
+    let age = wait_for_unacknowledged(port, 1.0);
     assert!(age >= 0.0, "the age is not negative");
     // Knowledge stays silent: the removal is published, kept, and the service stays ready.
     std::thread::sleep(Duration::from_secs(3));
@@ -689,18 +690,7 @@ async fn readiness_ignores_an_unanswered_removal_and_the_gauges_follow_it() {
         .expect("the acknowledgement publishes")
         .await
         .expect("the broker stores the acknowledgement");
-    let answered = Instant::now();
-    loop {
-        let metrics = http_get(port, "/metrics");
-        if series(body_of(&metrics), "x_unacknowledged_tombstones") == Some(0.0) {
-            break;
-        }
-        assert!(
-            answered.elapsed() < Duration::from_secs(15),
-            "the count gauge never returned to zero after the acknowledgement"
-        );
-        std::thread::sleep(Duration::from_millis(200));
-    }
+    wait_for_unacknowledged(port, 0.0);
     assert_eq!(
         try_status(port, "/health/ready").as_deref(),
         Some("HTTP/1.1 200 OK")

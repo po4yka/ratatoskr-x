@@ -30,7 +30,7 @@ const ALLOWED: [&str; 5] = [
 
 /// Removals are not acknowledged in these tests, so the resend schedule only has to exist.
 fn resend_policy() -> ResendPolicy {
-    ResendPolicy::new(Duration::from_secs(600), Duration::from_secs(21_600))
+    ResendPolicy::new(Duration::from_mins(10), Duration::from_hours(6))
 }
 
 async fn insert_row(test: &TestDatabase, event_type: &str, ordinal: u32) -> Uuid {

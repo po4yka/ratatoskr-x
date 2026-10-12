@@ -19,4 +19,4 @@
 
 ## 4. Gate
 
-- [ ] 4.1 Run the full local gate (`cargo fmt`, `cargo clippy`, the 850-line check, `cargo test --workspace --locked`, `cargo deny --locked check`, `openspec validate --all --strict`, `openspec validate --archived`) and record one real-broker transcript: publish, no acknowledgement, resend with the same `Nats-Msg-Id`, acknowledgement, stop.
+- [x] 4.1 Run the full local gate (`cargo fmt`, `cargo clippy`, the 850-line check, `cargo test --workspace --locked`, `cargo deny --locked check`, `openspec validate --all --strict`, `openspec validate --archived`) and record one real-broker transcript: publish, no acknowledgement, resend with the same `Nats-Msg-Id`, acknowledgement, stop.

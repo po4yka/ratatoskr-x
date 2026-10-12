@@ -225,24 +225,7 @@ fn spawn_bus_tasks(
         )
     });
 
-    // Readiness never depends on Knowledge answering: this task only fails when its durable is
-    // gone or its stream ends, like every other bus task.
-    let (acks, stream) = (context.clone(), config.bus.events_stream_name.clone());
-    let (db, signal) = (database.clone(), stopped(stop));
-    tasks.spawn(async move {
-        let result = deletion_acks::consume_deletion_acks(
-            &acks,
-            &db,
-            &stream,
-            deletion_acks::DURABLE,
-            signal,
-        )
-        .await;
-        (
-            "deletion_ack_consumer",
-            result.map(drop).map_err(|e| e.to_string()),
-        )
-    });
+    spawn_deletion_acks(&mut tasks, context, database, config, stopped(stop));
 
     let signal = stopped(stop);
     tasks.spawn(async move {
@@ -270,6 +253,34 @@ fn spawn_bus_tasks(
         ("outbox_relay", result.map_err(|e| e.to_string()))
     });
     Ok(tasks)
+}
+
+/// Starts the consumer of Knowledge's removal acknowledgements. Readiness never depends on
+/// Knowledge answering: this task only fails when its durable is gone or its stream ends, like
+/// every other bus task.
+fn spawn_deletion_acks(
+    tasks: &mut JoinSet<TaskExit>,
+    context: &jetstream::Context,
+    database: &Database,
+    config: &XConfig,
+    signal: impl std::future::Future<Output = ()> + Send + 'static,
+) {
+    let (acks, db) = (context.clone(), database.clone());
+    let stream = config.bus.events_stream_name.clone();
+    tasks.spawn(async move {
+        let result = deletion_acks::consume_deletion_acks(
+            &acks,
+            &db,
+            &stream,
+            deletion_acks::DURABLE,
+            signal,
+        )
+        .await;
+        (
+            "deletion_ack_consumer",
+            result.map(drop).map_err(|e| e.to_string()),
+        )
+    });
 }
 
 /// Resolves once shutdown was requested.

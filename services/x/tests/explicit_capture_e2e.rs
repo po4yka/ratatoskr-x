@@ -28,7 +28,7 @@ use x_sync::{AppBearerResolver, CapturePolicy, PublicCaptureWorker};
 
 /// Removals are not acknowledged in this test, so the resend schedule only has to exist.
 fn resend_policy() -> ResendPolicy {
-    ResendPolicy::new(Duration::from_secs(600), Duration::from_secs(21_600))
+    ResendPolicy::new(Duration::from_mins(10), Duration::from_hours(6))
 }
 
 /// The scenarios share the `cmd.x.capture.requested.v1` subject, so they run one at a time.
